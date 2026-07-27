@@ -38,6 +38,10 @@ export async function POST(request: NextRequest) {
       },
     });
     
+    // Auto-assign nearest branch if applicable
+    const { assignNearestBranchToLead } = await import('@/lib/assignment');
+    await assignNearestBranchToLead(lead.id);
+
     // Trigger notification check immediately
     checkAndNotify().catch(console.error);
     

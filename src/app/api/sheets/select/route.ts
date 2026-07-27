@@ -14,6 +14,15 @@ export async function POST(request: NextRequest) {
       );
     }
     
+    const currentSettings = await prisma.settings.findUnique({ where: { id: 1 } });
+    if (
+      currentSettings && 
+      (currentSettings.selectedSpreadsheetId !== spreadsheetId || currentSettings.selectedSheetName !== sheetName)
+    ) {
+      // Clear entire database cache because sheet is single source of truth
+      await prisma.lead.deleteMany({});
+    }
+    
     await prisma.settings.upsert({
       where: { id: 1 },
       update: {

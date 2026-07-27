@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
     const platform = searchParams.get('platform') || '';
     const sort = searchParams.get('sort') || 'desc';
     const city = searchParams.get('city') || '';
+    const branch = searchParams.get('branch') || '';
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
@@ -31,11 +32,15 @@ export async function GET(request: NextRequest) {
     }
     
     if (platform) {
-      where.platform = { contains: platform };
+      where.platform = platform;
     }
     
     if (city) {
       where.city = { contains: city };
+    }
+    
+    if (branch) {
+      where.assignedBranch = branch;
     }
     
     const [leads, total] = await Promise.all([

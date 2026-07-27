@@ -37,8 +37,8 @@ function SettingsContent() {
   const [loadingSheets, setLoadingSheets] = useState(false);
 
   // Column mapping
-  const [mapping, setMapping] = useState({
-    name: 0, phone: 1, city: 2, zipCode: 3, platform: 4, createdAt: 5, remark: 6, status: 7,
+  const [mapping, setMapping] = useState<{ [key: string]: number }>({
+    name: 0, phone: 1, city: 2, zipCode: 3, platform: 4, createdAt: 5, remark: 6, status: 7, branch: 8
   });
 
   const showToast = (message: string, type: "success" | "error" = "success") => {

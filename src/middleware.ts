@@ -4,7 +4,7 @@ import { jwtVerify } from 'jose';
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'fallback-secret-change-me');
 const COOKIE_NAME = 'sga-session';
 
-const publicPaths = ['/login', '/api/auth/login'];
+const publicPaths = ['/login', '/api/auth/login', '/api/webhooks'];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

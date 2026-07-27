@@ -12,6 +12,7 @@ interface ColumnMapping {
   createdAt: number;
   remark: number;
   status: number;
+  branch?: number;
 }
 
 const DEFAULT_MAPPING: ColumnMapping = {
@@ -94,6 +95,8 @@ export async function performSheetSync() {
   let synced = 0;
   let duplicates = 0;
   let skippedLowQuality = 0;
+  const activeFingerprints: string[] = [];
+  const fingerprintCounts = new Map<string, number>();
   
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
@@ -138,27 +141,47 @@ export async function performSheetSync() {
       status = 'closed_successful';
     }
     
+    const baseFingerprint = `${phone}|${platform}|${createdAtRaw}`;
+    const count = fingerprintCounts.get(baseFingerprint) || 0;
+    fingerprintCounts.set(baseFingerprint, count + 1);
+    
+    const fingerprint = `${baseFingerprint}|${count}`;
+    activeFingerprints.push(fingerprint);
+    
     try {
-      // Consider a lead as identical duplicate ONLY if ALL data fields match
-      const existing = await prisma.lead.findFirst({
-        where: {
-          name,
-          phone,
-          email,
-          city,
-          zipCode,
-          platform,
-          sheetId: settings.selectedSpreadsheetId,
-        },
+      let existing = await prisma.lead.findFirst({
+        where: { fingerprint }
       });
+
+      // Migration fallback for leads synced before fingerprints were added or occurrence added
+      if (!existing && count === 0) {
+        existing = await prisma.lead.findFirst({
+          where: {
+            phone,
+            platform,
+            OR: [
+              { fingerprint: null },
+              { fingerprint: baseFingerprint }
+            ]
+          }
+        });
+      }
 
       if (existing) {
         await prisma.lead.update({
           where: { id: existing.id },
           data: {
+            name,
+            phone,
+            email,
+            city,
+            zipCode,
+            platform,
             remark: remark || existing.remark,
             status: existing.status !== 'created' ? existing.status : status,
             sheetRow: rowNumber,
+            sheetId: settings.selectedSpreadsheetId,
+            fingerprint,
           },
         });
         duplicates++;
@@ -176,6 +199,7 @@ export async function performSheetSync() {
             status,
             sheetRow: rowNumber,
             sheetId: settings.selectedSpreadsheetId,
+            fingerprint,
           },
         });
         synced++;
@@ -185,7 +209,29 @@ export async function performSheetSync() {
     }
   }
   
-  await deduplicateDatabaseLeads();
+  // Single Source of Truth: Cleanup any lead not present in the current Google Sheet
+  if (activeFingerprints.length > 0) {
+    await prisma.lead.deleteMany({
+      where: {
+        OR: [
+          { fingerprint: { notIn: activeFingerprints } },
+          { fingerprint: null }
+        ]
+      }
+    });
+  }
+
+  // Assign nearest branch to any leads without one
+  const unassignedLeads = await prisma.lead.findMany({
+    where: { assignedBranch: null }
+  });
+  
+  if (unassignedLeads.length > 0) {
+    const { assignNearestBranchToLead } = await import('./assignment');
+    for (const l of unassignedLeads) {
+      await assignNearestBranchToLead(l.id);
+    }
+  }
 
   await prisma.settings.update({
     where: { id: 1 },

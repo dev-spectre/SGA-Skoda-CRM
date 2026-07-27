@@ -17,8 +17,10 @@ model Lead {
   platform  String   @default("")
   remark    String?
   status    String   @default("created")
+  assignedBranch String?
   sheetRow  Int?
   sheetId   String?
+  fingerprint String?
 
   notifiedAt DateTime?
   createdAt  DateTime  @default(now())
@@ -40,4 +42,15 @@ model Settings {
   notifiedPhones        String?   @default("[]")
   lastSyncAt            DateTime?
   updatedAt             DateTime  @updatedAt
+}
+
+model Branch {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String
+  latitude  Float?
+  longitude Float?
+  status    String   @default("active") // "active" or "inactive"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

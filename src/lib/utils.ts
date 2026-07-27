@@ -79,3 +79,67 @@ export function parseZipCode(rawZip: string | null | undefined): string {
   return str;
 }
 
+// Distance calculation using Haversine formula
+export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Radius of the Earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Distance in km
+}
+
+// In-memory cache to prevent Nominatim rate-limiting for repeated zipcodes/cities
+const globalForCache = globalThis as unknown as {
+  geocodeCache: Map<string, { lat: number; lng: number } | null> | undefined;
+};
+const geocodeCache = globalForCache.geocodeCache ?? new Map<string, { lat: number; lng: number } | null>();
+if (process.env.NODE_ENV !== 'production') globalForCache.geocodeCache = geocodeCache;
+
+export async function geocodeAddress(city: string, zipCode: string): Promise<{ lat: number; lng: number } | null> {
+  if (!city && !zipCode) return null;
+  
+  const query = [city, zipCode].filter(Boolean).join(', ');
+  if (!query) return null;
+  
+  const cacheKey = query.toLowerCase().trim();
+  if (geocodeCache.has(cacheKey)) {
+    return geocodeCache.get(cacheKey) || null;
+  }
+
+  try {
+    // Respect Nominatim rate limit (1 request per second)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'SGA-Skoda-CRM/1.0',
+      },
+    });
+    
+    if (!res.ok) {
+      console.warn(`Geocoding failed for ${query} with status: ${res.status}`);
+      return null;
+    }
+    
+    const data = await res.json();
+    if (data && data.length > 0) {
+      const result = {
+        lat: parseFloat(data[0].lat),
+        lng: parseFloat(data[0].lon)
+      };
+      geocodeCache.set(cacheKey, result);
+      return result;
+    }
+    
+    geocodeCache.set(cacheKey, null);
+    return null;
+  } catch (err) {
+    console.error('Geocoding error:', err);
+    return null;
+  }
+}

@@ -17,6 +17,7 @@ interface Lead {
   platform: string;
   remark: string | null;
   status: string;
+  assignedBranch?: string | null;
   createdAt: string;
 }
 
@@ -40,6 +41,10 @@ export default function DashboardPage() {
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [branches, setBranches] = useState<{ id: number; name: string }[]>([]);
+  const [platformFilter, setPlatformFilter] = useState("");
+  const [platforms, setPlatforms] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState("desc");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -69,6 +74,8 @@ export default function DashboardPage() {
       params.set("sort", sortOrder);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
+      if (branchFilter) params.set("branch", branchFilter);
+      if (platformFilter) params.set("platform", platformFilter);
 
       const res = await fetch(`/api/leads?${params}`);
       const data = await res.json();
@@ -83,10 +90,27 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [pagination.page, search, statusFilter, sortOrder]);
+  }, [pagination.page, search, statusFilter, branchFilter, platformFilter, sortOrder]);
 
   useEffect(() => {
     fetchLeads();
+    const fetchBranchesList = async () => {
+      try {
+        const res = await fetch("/api/branches");
+        const data = await res.json();
+        if (res.ok) setBranches(data.branches || []);
+      } catch {}
+    };
+    fetchBranchesList();
+
+    const fetchPlatformsList = async () => {
+      try {
+        const res = await fetch("/api/platforms");
+        const data = await res.json();
+        if (res.ok) setPlatforms(data.platforms || []);
+      } catch {}
+    };
+    fetchPlatformsList();
 
     const handleLeadsUpdated = () => {
       fetchLeads();
@@ -118,6 +142,8 @@ export default function DashboardPage() {
       params.set("sort", sortOrder);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
+      if (branchFilter) params.set("branch", branchFilter);
+      if (platformFilter) params.set("platform", platformFilter);
 
       const res = await fetch(`/api/leads?${params}`);
       const data = await res.json();
@@ -393,6 +419,24 @@ export default function DashboardPage() {
           <option value="closed_unsuccessful">Closed Unsuccessful</option>
         </select>
         <select
+          value={branchFilter}
+          onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+        >
+          <option value="">All Branches</option>
+          {branches.map(b => (
+            <option key={b.id} value={b.name}>{b.name}</option>
+          ))}
+        </select>
+        <select
+          value={platformFilter}
+          onChange={(e) => { setPlatformFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+        >
+          <option value="">All Platforms</option>
+          {platforms.map(p => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <select
           value={sortOrder}
           onChange={(e) => { setSortOrder(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         >
@@ -425,6 +469,7 @@ export default function DashboardPage() {
                   <th>City</th>
                   <th>Zip Code</th>
                   <th>Platform</th>
+                  <th>Assigned Branch</th>
                   <th>Created At</th>
                   <th>Status</th>
                   <th>Remark</th>
@@ -439,6 +484,7 @@ export default function DashboardPage() {
                     <td>{lead.city || "—"}</td>
                     <td>{lead.zipCode || "—"}</td>
                     <td>{lead.platform || "—"}</td>
+                    <td style={{ fontWeight: 500, color: "var(--primary-light)" }}>{lead.assignedBranch || "—"}</td>
                     <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{formatDate(lead.createdAt)}</td>
                     <td>
                       <select
