@@ -189,7 +189,7 @@ export async function getSheetNames(spreadsheetId: string) {
     fields: 'sheets.properties.title',
   });
   
-  return response.data.sheets?.map(s => s.properties?.title || '') || [];
+  return response.data.sheets?.map((s: { properties?: { title?: string | null } | null }) => s.properties?.title || '') || [];
 }
 
 export async function getSheetData(spreadsheetId: string, sheetName: string) {
@@ -293,7 +293,7 @@ export async function deleteSheetRow(
   });
 
   const targetSheet = spreadsheet.data.sheets?.find(
-    (s) => s.properties?.title === sheetName
+    (s: { properties?: { title?: string | null } | null }) => s.properties?.title === sheetName
   );
 
   const numericSheetId = targetSheet?.properties?.sheetId ?? 0;
@@ -334,7 +334,7 @@ export async function cleanEmptySheetRows(
     });
 
     const targetSheet = spreadsheet.data.sheets?.find(
-      (s) => s.properties?.title === sheetName
+      (s: { properties?: { title?: string | null } | null }) => s.properties?.title === sheetName
     );
 
     const numericSheetId = targetSheet?.properties?.sheetId ?? 0;
@@ -349,8 +349,8 @@ export async function cleanEmptySheetRows(
     }
 
     if (emptyRowIndices.length > 0) {
-      emptyRowIndices.sort((a, b) => b - a);
-      const requests = emptyRowIndices.map((idx) => ({
+      emptyRowIndices.sort((a: number, b: number) => b - a);
+      const requests = emptyRowIndices.map((idx: number) => ({
         deleteDimension: {
           range: {
             sheetId: numericSheetId,

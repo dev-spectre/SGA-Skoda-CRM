@@ -50,7 +50,7 @@ export async function computeIntelligentMapping(
   for (const [field, regexes] of Object.entries(regexMap)) {
     const key = field as keyof ColumnMapping;
     for (const regex of regexes) {
-      const matchIndex = headers.findIndex((h) => regex.test(h));
+      const matchIndex = headers.findIndex((h: string) => regex.test(h));
       // Avoid matching "ad_name" or "campaign_name" with the generic /name/i fallback if we can help it, 
       // but since it's the last in the array, it will only be used if nothing else matches.
       // However, explicitly reject 'ad_name' or 'campaign_name' for the 'name' field
@@ -70,8 +70,8 @@ export async function computeIntelligentMapping(
   if (mapping.phone === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
       if (Object.values(mapping).includes(c)) continue;
-      const isPhone = dataRows.some(row => {
-        const val = String(row[c] || '').replace(/\D/g, '');
+      const isPhone = dataRows.some((row: unknown[]) => {
+        const val = String((row as unknown[])[c] || '').replace(/\D/g, '');
         return val.length >= 10 && val.length <= 15;
       });
       if (isPhone) { mapping.phone = c; break; }
@@ -81,8 +81,8 @@ export async function computeIntelligentMapping(
   if (mapping.zipCode === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
       if (Object.values(mapping).includes(c)) continue;
-      const isZip = dataRows.some(row => {
-        const val = String(row[c] || '').trim();
+      const isZip = dataRows.some((row: unknown[]) => {
+        const val = String((row as unknown[])[c] || '').trim();
         return /^\d{5,6}$/.test(val);
       });
       if (isZip) { mapping.zipCode = c; break; }
@@ -92,8 +92,8 @@ export async function computeIntelligentMapping(
   if (mapping.createdAt === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
       if (Object.values(mapping).includes(c)) continue;
-      const isDate = dataRows.some(row => {
-        const val = String(row[c] || '').trim();
+      const isDate = dataRows.some((row: unknown[]) => {
+        const val = String((row as unknown[])[c] || '').trim();
         return val && !isNaN(new Date(val).getTime()) && val.includes('-');
       });
       if (isDate) { mapping.createdAt = c; break; }

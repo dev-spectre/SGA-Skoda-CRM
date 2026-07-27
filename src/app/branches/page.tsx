@@ -155,7 +155,7 @@ export default function BranchesPage() {
                 </tr>
               </thead>
               <tbody>
-                {branches.map((branch) => (
+                {branches.map((branch: Branch) => (
                   <tr key={branch.id}>
                     <td style={{ fontWeight: 600 }}>{branch.name}</td>
                     <td style={{ maxWidth: 300, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={branch.address}>

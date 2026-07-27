@@ -10,7 +10,7 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   
   // Allow public paths
-  if (publicPaths.some(p => pathname.startsWith(p))) {
+  if (publicPaths.some((p: string) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
   

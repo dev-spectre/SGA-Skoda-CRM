@@ -10,7 +10,7 @@ export async function assignNearestBranchToLead(leadId: number): Promise<string 
   const branches = await prisma.branch.findMany({ where: { status: 'active' } });
   if (branches.length === 0) return null;
 
-  const validBranches = branches.filter(b => b.latitude && b.longitude);
+  const validBranches = branches.filter((b: { latitude?: number | null; longitude?: number | null }) => b.latitude && b.longitude);
   if (validBranches.length === 0) return null;
 
   const coords = await geocodeAddress(lead.city, lead.zipCode);

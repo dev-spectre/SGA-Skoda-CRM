@@ -124,7 +124,7 @@ function SettingsContent() {
     if (!selectedSpreadsheet || !selectedSheet) return;
     setSaving(true);
     try {
-      const spreadsheet = spreadsheets.find(s => s.id === selectedSpreadsheet);
+      const spreadsheet = spreadsheets.find((s: Spreadsheet) => s.id === selectedSpreadsheet);
       const res = await fetch("/api/sheets/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -302,7 +302,7 @@ function SettingsContent() {
                 style={{ flex: 1, minWidth: 250 }}
               >
                 <option value="">Select a spreadsheet...</option>
-                {spreadsheets.map((s) => (
+                {spreadsheets.map((s: Spreadsheet) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
               </select>
@@ -319,7 +319,7 @@ function SettingsContent() {
                     style={{ flex: 1, minWidth: 250 }}
                   >
                     <option value="">Select a sheet...</option>
-                    {sheetNames.map((name) => (
+                    {sheetNames.map((name: string) => (
                       <option key={name} value={name}>{name}</option>
                     ))}
                   </select>

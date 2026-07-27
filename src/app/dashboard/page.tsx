@@ -424,7 +424,7 @@ export default function DashboardPage() {
           onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         >
           <option value="">All Branches</option>
-          {branches.map(b => (
+          {branches.map((b: { id: number; name: string }) => (
             <option key={b.id} value={b.name}>{b.name}</option>
           ))}
         </select>
@@ -433,7 +433,7 @@ export default function DashboardPage() {
           onChange={(e) => { setPlatformFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         >
           <option value="">All Platforms</option>
-          {platforms.map(p => (
+          {platforms.map((p: string) => (
             <option key={p} value={p}>{p}</option>
           ))}
         </select>
