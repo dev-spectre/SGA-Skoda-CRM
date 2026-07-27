@@ -15,6 +15,8 @@ if (publicVapidKey && privateVapidKey) {
   }
 }
 
+const lastSentPayloads = new Map<string, { body: string; time: number }>();
+
 export async function sendWebPushNotifications(payload: { title: string; body: string; url?: string }) {
   if (!publicVapidKey || !privateVapidKey) {
     return;
@@ -28,9 +30,29 @@ export async function sendWebPushNotifications(payload: { title: string; body: s
       const intervalMinutes = sub.interval || 5;
       const cutoff = new Date(now.getTime() - intervalMinutes * 60 * 1000);
 
+      // 1. Skip if device was notified within its interval window
       if (sub.lastNotifiedAt && sub.lastNotifiedAt > cutoff) {
         return;
       }
+
+      // 2. Skip if exact same notification message was sent to this device within its interval window
+      const lastPayload = lastSentPayloads.get(sub.endpoint);
+      if (lastPayload && lastPayload.body === payload.body && lastPayload.time > cutoff.getTime()) {
+        return;
+      }
+
+      // 3. Atomically update DB lastNotifiedAt BEFORE sending push to prevent race conditions from concurrent requests
+      try {
+        await prisma.pushSubscription.update({
+          where: { id: sub.id },
+          data: { lastNotifiedAt: now },
+        });
+      } catch {
+        return;
+      }
+
+      // Record payload in memory cache
+      lastSentPayloads.set(sub.endpoint, { body: payload.body, time: now.getTime() });
 
       try {
         const pushSubscription = {
@@ -39,11 +61,6 @@ export async function sendWebPushNotifications(payload: { title: string; body: s
         };
 
         await webpush.sendNotification(pushSubscription, JSON.stringify(payload));
-        
-        await prisma.pushSubscription.update({
-          where: { id: sub.id },
-          data: { lastNotifiedAt: now },
-        });
       } catch (err: any) {
         console.error(`Web Push delivery failed to ${sub.endpoint}:`, err?.message || err);
         if (err?.statusCode === 404 || err?.statusCode === 410) {
