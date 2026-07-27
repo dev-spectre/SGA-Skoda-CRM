@@ -1,60 +1,65 @@
-import { execFile } from 'child_process';
 import { prisma } from './prisma';
 import { parsePhoneNumber } from './utils';
 import { performSheetSync } from './sync';
+import webpush from 'web-push';
 
-let notifier: { notify: (options: Record<string, unknown>, callback?: (err: unknown, response: unknown) => void) => void } | null = null;
+const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+const privateVapidKey = process.env.VAPID_PRIVATE_KEY;
+const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@sgaskoda.com';
 
-async function getNotifier() {
-  if (!notifier) {
-    try {
-      const mod = await import('toasted-notifier');
-      notifier = mod.default || mod;
-    } catch {
-      console.warn('toasted-notifier not available, using notify-send fallback');
-      return null;
-    }
+if (publicVapidKey && privateVapidKey) {
+  try {
+    webpush.setVapidDetails(vapidSubject, publicVapidKey, privateVapidKey);
+  } catch (e) {
+    console.warn('VAPID setup warning:', e);
   }
-  return notifier;
+}
+
+export async function sendWebPushNotifications(payload: { title: string; body: string; url?: string }) {
+  if (!publicVapidKey || !privateVapidKey) {
+    return;
+  }
+
+  try {
+    const subscriptions = await prisma.pushSubscription.findMany();
+    const now = new Date();
+
+    for (const sub of subscriptions) {
+      // Respect per-device / per-user custom notification interval
+      const intervalMinutes = sub.interval || 5;
+      const cutoff = new Date(now.getTime() - intervalMinutes * 60 * 1000);
+
+      if (sub.lastNotifiedAt && sub.lastNotifiedAt > cutoff) {
+        continue;
+      }
+
+      try {
+        const pushSubscription = {
+          endpoint: sub.endpoint,
+          keys: JSON.parse(sub.keys),
+        };
+
+        await webpush.sendNotification(pushSubscription, JSON.stringify(payload));
+        
+        await prisma.pushSubscription.update({
+          where: { id: sub.id },
+          data: { lastNotifiedAt: now },
+        });
+      } catch (err: any) {
+        console.error(`Web Push delivery failed to ${sub.endpoint}:`, err?.message || err);
+        if (err?.statusCode === 404 || err?.statusCode === 410) {
+          await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error dispatching Web Push notifications:', err);
+  }
 }
 
 export function sendSystemNotification(title: string, message: string) {
-  getNotifier().then((toastedNotifier) => {
-    let handled = false;
-    if (toastedNotifier) {
-      try {
-        toastedNotifier.notify({
-          title,
-          message,
-          sound: true,
-          wait: false,
-        }, (err) => {
-          if (err) {
-            console.warn('toasted-notifier callback error, attempting notify-send directly:', err);
-            fallbackNotifySend(title, message);
-          }
-        });
-        handled = true;
-      } catch (err) {
-        console.warn('toasted-notifier exception, using notify-send fallback:', err);
-      }
-    }
-    if (!handled) {
-      fallbackNotifySend(title, message);
-    }
-  }).catch(() => {
-    fallbackNotifySend(title, message);
-  });
-}
-
-function fallbackNotifySend(title: string, message: string) {
-  execFile('notify-send', [title, message], (err) => {
-    if (err) {
-      console.error('Failed to send desktop notification via notify-send:', err);
-    } else {
-      console.log(`🔔 System Desktop Notification Sent: "${title}" - "${message}"`);
-    }
-  });
+  // Dispatch Web Push exclusively to all registered devices/browsers
+  sendWebPushNotifications({ title, body: message }).catch(console.error);
 }
 
 export async function checkAndNotify() {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { registerWebPushSubscription, getWebPushSubscription, unsubscribeWebPush } from "@/components/NotificationInit";
 
 interface SettingsData {
   notificationInterval: number;
@@ -32,6 +33,7 @@ function SettingsContent() {
   const [selectedSheet, setSelectedSheet] = useState("");
   const [interval, setInterval_] = useState(5);
   const [bgNotificationsEnabled, setBgNotificationsEnabled] = useState(true);
+  const [webPushEnabled, setWebPushEnabled] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -47,6 +49,9 @@ function SettingsContent() {
   };
 
   useEffect(() => {
+    // Check Web Push subscription status for current device
+    getWebPushSubscription().then((sub) => setWebPushEnabled(!!sub));
+
     // Check for OAuth callback messages
     const success = searchParams.get("success");
     const error = searchParams.get("error");
@@ -372,89 +377,84 @@ function SettingsContent() {
 
       {/* Notifications */}
       <div className="settings-section">
-        <h2>Notifications</h2>
-        <p className="section-desc">Configure desktop notification interval for unclosed leads.</p>
-        <div className="settings-row" style={{ marginBottom: 16 }}>
-          <label>Check interval (minutes)</label>
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <input
-              type="number"
-              min="1"
-              max="1440"
-              value={interval}
-              onChange={(e) => setInterval_(parseInt(e.target.value) || 5)}
-              style={{ width: 100 }}
-            />
-            <button className="btn btn-primary btn-sm" onClick={handleSaveInterval} disabled={saving}>
-              Save
-            </button>
-          </div>
-        </div>
+        <h2>Web Push Notifications</h2>
+        <p className="section-desc">Receive OS desktop and mobile push notifications even when your browser is completely closed.</p>
+        
         <div className="settings-row" style={{ marginBottom: 16 }}>
           <div>
-            <label style={{ display: "block", fontWeight: 600 }}>Enable Notifications</label>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Receive desktop browser notifications while the website tab is open.
+            <label style={{ display: "block", fontWeight: 600 }}>Web Push Status</label>
+            <span style={{ fontSize: 12, color: webPushEnabled ? "var(--accent-color)" : "var(--text-muted)" }}>
+              {webPushEnabled 
+                ? "🟢 Web Push is ACTIVE for this browser/device." 
+                : "⚪ Web Push is DISABLED for this browser/device."}
             </span>
           </div>
           <button
-            className={`btn btn-sm ${bgNotificationsEnabled ? "btn-primary" : "btn-secondary"}`}
+            className={`btn btn-sm ${webPushEnabled ? "btn-secondary" : "btn-primary"}`}
             onClick={async () => {
-              const newValue = !bgNotificationsEnabled;
-              setBgNotificationsEnabled(newValue);
-              setSaving(true);
-              try {
-                const res = await fetch("/api/settings", {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ backgroundNotificationsEnabled: newValue }),
-                });
-                if (res.ok) {
-                  showToast(newValue ? "Background system notifications enabled!" : "Background system notifications disabled!");
+              if (webPushEnabled) {
+                const ok = await unsubscribeWebPush();
+                if (ok) {
+                  setWebPushEnabled(false);
+                  showToast("Web Push notifications disabled for this device");
                 } else {
-                  showToast("Failed to update background notification settings", "error");
-                  setBgNotificationsEnabled(!newValue);
+                  showToast("Failed to disable Web Push", "error");
                 }
-              } catch {
-                showToast("Failed to update background notification settings", "error");
-                setBgNotificationsEnabled(!newValue);
-              } finally {
-                setSaving(false);
+              } else {
+                if (typeof window !== 'undefined' && 'Notification' in window) {
+                  const perm = await Notification.requestPermission();
+                  if (perm === 'granted') {
+                    const sub = await registerWebPushSubscription(interval);
+                    if (sub) {
+                      setWebPushEnabled(true);
+                      showToast("Web Push notifications enabled for this device!");
+                    } else {
+                      showToast("Failed to register Web Push", "error");
+                    }
+                  } else {
+                    showToast("Notification permission denied in browser", "error");
+                  }
+                } else {
+                  showToast("Web Push is not supported in this browser", "error");
+                }
               }
             }}
-            disabled={saving}
           >
-            {bgNotificationsEnabled ? "Enabled (Click to Disable)" : "Disabled (Click to Enable)"}
+            {webPushEnabled ? "Disable Web Push" : "Enable Web Push"}
           </button>
         </div>
-        <div className="settings-row">
-          <label>Browser Notifications</label>
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <button 
-              className="btn btn-secondary btn-sm" 
-              onClick={() => {
-                const isDisabled = localStorage.getItem('browser_notifications') === 'disabled';
-                if (isDisabled) {
-                  localStorage.removeItem('browser_notifications');
-                  if (typeof window !== 'undefined' && 'Notification' in window) {
-                    Notification.requestPermission();
-                  }
-                  showToast("Browser notifications enabled");
-                } else {
-                  localStorage.setItem('browser_notifications', 'disabled');
-                  showToast("Browser notifications disabled");
-                }
-                // Force re-render to update button text
-                setSaving(s => !s);
-                setTimeout(() => setSaving(s => !s), 10);
-              }}
-            >
-              {typeof window !== 'undefined' && localStorage.getItem('browser_notifications') === 'disabled' 
-                ? "Enable Browser Notifications" 
-                : "Disable Browser Notifications"}
-            </button>
+
+        {webPushEnabled && (
+          <div className="settings-row">
+            <div>
+              <label style={{ display: "block", fontWeight: 600 }}>Notification Check Interval (minutes)</label>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Set how frequently this device should be checked and notified for unclosed leads.
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <input
+                type="number"
+                min="1"
+                max="1440"
+                value={interval}
+                onChange={(e) => setInterval_(parseInt(e.target.value) || 5)}
+                style={{ width: 100 }}
+              />
+              <button 
+                className="btn btn-primary btn-sm" 
+                onClick={async () => {
+                  await handleSaveInterval();
+                  await registerWebPushSubscription(interval);
+                  showToast(`Device notification interval updated to ${interval} minute(s)!`);
+                }} 
+                disabled={saving}
+              >
+                Save Interval
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Webhooks & Instant Sync */}

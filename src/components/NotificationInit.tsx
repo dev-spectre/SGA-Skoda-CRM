@@ -2,20 +2,113 @@
 
 import { useEffect, useRef } from "react";
 
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+export async function registerWebPushSubscription(customInterval?: number) {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return null;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+
+    let subscription = await registration.pushManager.getSubscription();
+
+    const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!subscription && publicVapidKey) {
+      const convertedVapidKey = urlBase64ToUint8Array(publicVapidKey);
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: convertedVapidKey,
+      });
+    }
+
+    if (subscription) {
+      const storedInterval = localStorage.getItem('device_notification_interval');
+      const interval = customInterval ?? (storedInterval ? parseInt(storedInterval) : 5);
+
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscription,
+          interval,
+          deviceName: navigator.userAgent.includes('Mobile') ? 'Mobile Browser' : 'Desktop Browser',
+        }),
+      });
+    }
+
+    return subscription;
+  } catch (err) {
+    console.error('Web Push registration error:', err);
+    return null;
+  }
+}
+
+export async function getWebPushSubscription() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return null;
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    return await registration.pushManager.getSubscription();
+  } catch {
+    return null;
+  }
+}
+
+export async function unsubscribeWebPush() {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return false;
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      const endpoint = subscription.endpoint;
+      await subscription.unsubscribe();
+      await fetch('/api/push/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint }),
+      });
+    }
+    return true;
+  } catch (err) {
+    console.error('Web Push unsubscribe error:', err);
+    return false;
+  }
+}
+
 export function NotificationInit() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Request permission if not already granted/denied and not explicitly disabled
-    const requestPermission = async () => {
+    // Request permission and register Web Push Service Worker
+    const requestPermissionAndPush = async () => {
       if (typeof window !== 'undefined' && 'Notification' in window) {
         if (Notification.permission === 'default' && localStorage.getItem('browser_notifications') !== 'disabled') {
-          await Notification.requestPermission();
+          const perm = await Notification.requestPermission();
+          if (perm === 'granted') {
+            await registerWebPushSubscription();
+          }
+        } else if (Notification.permission === 'granted' && localStorage.getItem('browser_notifications') !== 'disabled') {
+          await registerWebPushSubscription();
         }
       }
     };
     
-    requestPermission();
+    requestPermissionAndPush();
 
     const scheduleNextCheck = (delayMs: number) => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -30,31 +123,6 @@ export function NotificationInit() {
           const data = await res.json();
           if (data.interval) {
             nextIntervalMs = data.interval * 60 * 1000;
-          }
-
-          // Trigger HTML5 Browser Notifications if permission is granted
-          if (
-            typeof window !== 'undefined' &&
-            'Notification' in window &&
-            Notification.permission === 'granted' &&
-            localStorage.getItem('browser_notifications') !== 'disabled'
-          ) {
-            if (data.newLeadsSynced > 0) {
-              new Notification('🚗 SGA Skoda CRM — 🆕 New Lead Received!', {
-                body: `Synced ${data.newLeadsSynced} new lead(s) automatically!`,
-              });
-            } else if (data.notified > 0 && data.leads && data.leads.length > 0) {
-              if (data.leads.length === 1) {
-                const lead = data.leads[0];
-                new Notification('🚗 SGA Skoda CRM — Open Lead', {
-                  body: `${lead.name} (${lead.phone}) from ${lead.city || 'Unknown'} — ${lead.platform || 'N/A'}`,
-                });
-              } else {
-                new Notification('🚗 SGA Skoda CRM', {
-                  body: `You have ${data.leads.length} open lead(s) needing attention!`,
-                });
-              }
-            }
           }
 
           // Notify dashboard components of updated lead state
