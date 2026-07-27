@@ -1,16 +1,20 @@
 import { PrismaClient } from '@prisma/client';
-import { PrismaLibSql } from '@prisma/adapter-libsql';
+import { PrismaNeon } from '@prisma/adapter-neon';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-const url = process.env.DATABASE_URL || 'file:./dev.db';
+function createPrismaClient() {
+  const url = process.env.DATABASE_URL;
+  if (url && (url.startsWith('postgres://') || url.startsWith('postgresql://'))) {
+    const adapter = new PrismaNeon({ connectionString: url });
+    return new PrismaClient({ adapter });
+  }
+  return new PrismaClient();
+}
 
-const adapter = new PrismaLibSql({ url });
-
-// Fresh instance to ensure new schema fields (like notifiedPhones) are picked up immediately by Next.js HMR
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
+export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma;
