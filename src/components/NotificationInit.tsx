@@ -19,6 +19,7 @@ export async function registerWebPushSubscription(customInterval?: number) {
   }
 
   try {
+    localStorage.setItem('browser_notifications', 'enabled');
     const registration = await navigator.serviceWorker.register('/sw.js');
     await navigator.serviceWorker.ready;
 
@@ -59,6 +60,9 @@ export async function getWebPushSubscription() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
     return null;
   }
+  if (localStorage.getItem('browser_notifications') === 'disabled') {
+    return null;
+  }
   try {
     const registration = await navigator.serviceWorker.ready;
     return await registration.pushManager.getSubscription();
@@ -72,6 +76,7 @@ export async function unsubscribeWebPush() {
     return false;
   }
   try {
+    localStorage.setItem('browser_notifications', 'disabled');
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
     if (subscription) {

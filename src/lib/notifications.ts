@@ -41,26 +41,21 @@ export async function sendWebPushNotifications(payload: { title: string; body: s
         return;
       }
 
-      // 3. Atomically update DB lastNotifiedAt BEFORE sending push to prevent race conditions from concurrent requests
-      try {
-        await prisma.pushSubscription.update({
-          where: { id: sub.id },
-          data: { lastNotifiedAt: now },
-        });
-      } catch {
-        return;
-      }
-
-      // Record payload in memory cache
-      lastSentPayloads.set(sub.endpoint, { body: payload.body, time: now.getTime() });
-
       try {
         const pushSubscription = {
           endpoint: sub.endpoint,
           keys: JSON.parse(sub.keys),
         };
 
+        // Await Web Push delivery
         await webpush.sendNotification(pushSubscription, JSON.stringify(payload));
+        
+        // Record successful dispatch in DB and memory
+        lastSentPayloads.set(sub.endpoint, { body: payload.body, time: now.getTime() });
+        await prisma.pushSubscription.update({
+          where: { id: sub.id },
+          data: { lastNotifiedAt: now },
+        });
       } catch (err: any) {
         console.error(`Web Push delivery failed to ${sub.endpoint}:`, err?.message || err);
         if (err?.statusCode === 404 || err?.statusCode === 410) {
@@ -75,9 +70,9 @@ export async function sendWebPushNotifications(payload: { title: string; body: s
   }
 }
 
-export function sendSystemNotification(title: string, message: string) {
+export async function sendSystemNotification(title: string, message: string) {
   // Dispatch Web Push exclusively to all registered devices/browsers
-  sendWebPushNotifications({ title, body: message }).catch(console.error);
+  await sendWebPushNotifications({ title, body: message });
 }
 
 export async function checkAndNotify() {
@@ -110,21 +105,21 @@ export async function checkAndNotify() {
       return { notified: 0, newLeadsSynced, interval: intervalMinutes };
     }
 
-    // 3. Construct clean notification alert message
+    // 3. Construct clean notification alert message and await push completion
     if (newLeadsSynced > 0) {
-      sendSystemNotification(
+      await sendSystemNotification(
         '🚗 SGA Skoda CRM — 🆕 New Lead Received!',
         `Synced ${newLeadsSynced} new lead(s) automatically!`
       );
     } else if (unclosedLeads.length === 1) {
       const lead = unclosedLeads[0];
       const cleanPhone = parsePhoneNumber(lead.phone);
-      sendSystemNotification(
+      await sendSystemNotification(
         '🚗 SGA Skoda CRM — Open Lead',
         `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'} — ${lead.platform || 'N/A'}`
       );
     } else {
-      sendSystemNotification(
+      await sendSystemNotification(
         '🚗 SGA Skoda CRM',
         `You have ${unclosedLeads.length} open lead(s) needing attention!`
       );
