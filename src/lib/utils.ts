@@ -52,3 +52,30 @@ export function sanitizeField(rawVal: string | null | undefined): string {
   }
   return str;
 }
+
+export function parseZipCode(rawZip: string | null | undefined): string {
+  if (!rawZip) return '';
+  const str = String(rawZip).trim();
+  
+  // Match Indian PIN code (6 digits, optional space in middle)
+  const pinMatch = str.match(/(?<!\d)(\d{3})\s?(\d{3})(?!\d)/);
+  if (pinMatch) {
+    return pinMatch[1] + pinMatch[2];
+  }
+  
+  // Match US/International standard zip (5 digits, optional -4 extension)
+  const usMatch = str.match(/(?<!\d)\d{5}(?:-\d{4})?(?!\d)/);
+  if (usMatch) {
+    return usMatch[0];
+  }
+  
+  // Fallback: remove all non-digits, return first 5-6 digits if exists
+  const digits = str.replace(/\D/g, '');
+  const fallback = digits.match(/\d{5,6}/);
+  if (fallback) {
+    return fallback[0];
+  }
+  
+  return str;
+}
+

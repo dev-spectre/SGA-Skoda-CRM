@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { parsePhoneNumber } from "@/lib/utils";
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
 
 interface Lead {
   id: number;
@@ -40,6 +44,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   // Remark modal
   const [remarkModal, setRemarkModal] = useState<Lead | null>(null);
@@ -103,6 +108,104 @@ export default function DashboardPage() {
       clearInterval(autoRefreshInterval);
     };
   }, [fetchLeads]);
+
+  
+  const fetchAllFilteredLeads = async () => {
+    try {
+      const params = new URLSearchParams();
+      params.set("page", "1");
+      params.set("limit", "100000");
+      params.set("sort", sortOrder);
+      if (search) params.set("search", search);
+      if (statusFilter) params.set("status", statusFilter);
+
+      const res = await fetch(`/api/leads?${params}`);
+      const data = await res.json();
+      if (res.ok) {
+        return data.leads;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setExportLoading(true);
+    const allLeads = await fetchAllFilteredLeads();
+    if (!allLeads || allLeads.length === 0) {
+      showToast("No data to export", "error");
+      setExportLoading(false);
+      return;
+    }
+
+    const exportData = allLeads.map((l: Lead) => ({
+      Name: l.name,
+      Phone: l.phone,
+      Email: l.email || "-",
+      City: l.city || "-",
+      "Zip Code": l.zipCode || "-",
+      Platform: l.platform || "-",
+      "Created At": formatDate(l.createdAt),
+      Status: l.status.replace("_", " "),
+      Remark: l.remark || "-"
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");
+    
+    const cols = Object.keys(exportData[0]).map(() => ({ wch: 15 }));
+    worksheet['!cols'] = cols;
+
+    XLSX.writeFile(workbook, "SGA_Skoda_Leads.xlsx");
+    setExportLoading(false);
+    showToast("Excel exported successfully");
+  };
+
+  const handleExportPDF = async () => {
+    setExportLoading(true);
+    const allLeads = await fetchAllFilteredLeads();
+    if (!allLeads || allLeads.length === 0) {
+      showToast("No data to export", "error");
+      setExportLoading(false);
+      return;
+    }
+
+    const doc = new jsPDF();
+    
+    doc.setFontSize(16);
+    doc.text("SGA Skoda Leads Report", 14, 15);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 22);
+
+    const tableColumn = ["Name", "Phone", "City", "Zip", "Status", "Date"];
+    const tableRows: any[] = [];
+
+    allLeads.forEach((l: Lead) => {
+      tableRows.push([
+        l.name,
+        l.phone,
+        l.city || "-",
+        l.zipCode || "-",
+        l.status.replace("_", " "),
+        new Date(l.createdAt).toLocaleDateString()
+      ]);
+    });
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 28,
+      theme: 'grid',
+      headStyles: { fillColor: [16, 185, 129] }
+    });
+
+    doc.save("SGA_Skoda_Leads.pdf");
+    setExportLoading(false);
+    showToast("PDF exported successfully");
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -230,6 +333,14 @@ export default function DashboardPage() {
           {/* <button className="btn btn-ghost" style={{ color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }} onClick={handleClearDbData}>
             Clear DB Data
           </button> */}
+          
+          <button className="btn btn-ghost" onClick={handleExportExcel} disabled={exportLoading}>
+            {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export Excel"}
+          </button>
+          <button className="btn btn-ghost" onClick={handleExportPDF} disabled={exportLoading}>
+            {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export PDF"}
+          </button>
+
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing}>
             {syncing ? <><span className="spinner" /> Syncing...</> : (
               <>

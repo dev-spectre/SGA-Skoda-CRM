@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { parsePhoneNumber } from '@/lib/utils';
+import { parsePhoneNumber, parseZipCode } from '@/lib/utils';
 import { checkAndNotify } from '@/lib/notifications';
 
 export async function POST(request: NextRequest) {
@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
         phone: parsedPhone,
         email: parsedEmail,
         city: parsedCity,
-        zipCode: (zipCode || '').toString().trim(),
+        zipCode: parseZipCode(zipCode),
         platform: (platform || 'Webhook').toString().trim(),
         remark: remark ? String(remark).trim() : null,
         status: 'created',

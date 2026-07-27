@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { getSheetData } from '@/lib/google';
-import { parsePhoneNumber, sanitizeField } from '@/lib/utils';
+import { parsePhoneNumber, sanitizeField, parseZipCode } from '@/lib/utils';
 
 interface ColumnMapping {
   name: number;
@@ -115,7 +115,7 @@ export async function performSheetSync() {
       continue;
     }
     
-    const zipCode = sanitizeField((row[mapping.zipCode] || '').toString());
+    const zipCode = parseZipCode((row[mapping.zipCode] || '').toString());
     const platform = sanitizeField((row[mapping.platform] || '').toString());
     const createdAtRaw = (row[mapping.createdAt] || '').toString().trim();
     const remark = sanitizeField((row[mapping.remark] || '').toString()) || null;
