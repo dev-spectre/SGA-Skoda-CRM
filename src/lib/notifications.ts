@@ -24,13 +24,12 @@ export async function sendWebPushNotifications(payload: { title: string; body: s
     const subscriptions = await prisma.pushSubscription.findMany();
     const now = new Date();
 
-    for (const sub of subscriptions) {
-      // Respect per-device / per-user custom notification interval
+    const pushPromises = subscriptions.map(async (sub) => {
       const intervalMinutes = sub.interval || 5;
       const cutoff = new Date(now.getTime() - intervalMinutes * 60 * 1000);
 
       if (sub.lastNotifiedAt && sub.lastNotifiedAt > cutoff) {
-        continue;
+        return;
       }
 
       try {
@@ -51,7 +50,9 @@ export async function sendWebPushNotifications(payload: { title: string; body: s
           await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
         }
       }
-    }
+    });
+
+    await Promise.allSettled(pushPromises);
   } catch (err) {
     console.error('Error dispatching Web Push notifications:', err);
   }
@@ -69,11 +70,12 @@ export async function checkAndNotify() {
       return { notified: 0, interval: settings.notificationInterval || 5, disabled: true };
     }
 
-    // 1. Perform automatic sheet sync in background to discover new leads
+    // 1. Perform automatic sheet sync in background (with 5s max timeout to prevent HTTP timeout)
     let newLeadsSynced = 0;
     try {
-      const syncResult = await performSheetSync();
-      newLeadsSynced = syncResult.synced || 0;
+      const syncTimeout = new Promise((resolve) => setTimeout(() => resolve({ synced: 0, timeout: true }), 5000));
+      const syncResult: any = await Promise.race([performSheetSync(), syncTimeout]);
+      newLeadsSynced = syncResult?.synced || 0;
     } catch (syncErr) {
       console.error('Auto background sync warning:', syncErr);
     }
@@ -82,21 +84,16 @@ export async function checkAndNotify() {
     const intervalMs = intervalMinutes * 60 * 1000;
     const cutoff = new Date(Date.now() - intervalMs);
 
-    // 2. Find all unclosed leads from DB that haven't been notified within interval
+    // 2. Find all unclosed leads from DB
     const unclosedLeads = await prisma.lead.findMany({
-      where: {
-        status: 'created',
-        OR: [
-          { notifiedAt: null },
-          { notifiedAt: { lt: cutoff } },
-        ],
-      },
+      where: { status: 'created' },
     });
 
     if (unclosedLeads.length === 0) {
       return { notified: 0, newLeadsSynced, interval: intervalMinutes };
     }
 
+    // 3. Construct clean notification alert message
     if (newLeadsSynced > 0) {
       sendSystemNotification(
         '🚗 SGA Skoda CRM — 🆕 New Lead Received!',
@@ -115,13 +112,6 @@ export async function checkAndNotify() {
         `You have ${unclosedLeads.length} open lead(s) needing attention!`
       );
     }
-
-    // Update notifiedAt timestamp in DB
-    const leadIds = unclosedLeads.map((l: { id: number }) => l.id);
-    await prisma.lead.updateMany({
-      where: { id: { in: leadIds } },
-      data: { notifiedAt: new Date() },
-    });
 
     return {
       notified: unclosedLeads.length,

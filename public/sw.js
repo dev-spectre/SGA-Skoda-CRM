@@ -15,6 +15,8 @@ self.addEventListener('push', function(event) {
     body: data.body || 'New Lead Received!',
     icon: '/favicon.ico',
     badge: '/favicon.ico',
+    tag: 'sga-skoda-lead-alert',
+    renotify: true,
     vibrate: [200, 100, 200],
     data: data.url || '/dashboard',
     actions: [
