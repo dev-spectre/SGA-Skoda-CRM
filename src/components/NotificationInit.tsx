@@ -32,6 +32,31 @@ export function NotificationInit() {
             nextIntervalMs = data.interval * 60 * 1000;
           }
 
+          // Trigger HTML5 Browser Notifications if permission is granted
+          if (
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            Notification.permission === 'granted' &&
+            localStorage.getItem('browser_notifications') !== 'disabled'
+          ) {
+            if (data.newLeadsSynced > 0) {
+              new Notification('🚗 SGA Skoda CRM — 🆕 New Lead Received!', {
+                body: `Synced ${data.newLeadsSynced} new lead(s) automatically!`,
+              });
+            } else if (data.notified > 0 && data.leads && data.leads.length > 0) {
+              if (data.leads.length === 1) {
+                const lead = data.leads[0];
+                new Notification('🚗 SGA Skoda CRM — Open Lead', {
+                  body: `${lead.name} (${lead.phone}) from ${lead.city || 'Unknown'} — ${lead.platform || 'N/A'}`,
+                });
+              } else {
+                new Notification('🚗 SGA Skoda CRM', {
+                  body: `You have ${data.leads.length} open lead(s) needing attention!`,
+                });
+              }
+            }
+          }
+
           // Notify dashboard components of updated lead state
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('crm-leads-updated'));
