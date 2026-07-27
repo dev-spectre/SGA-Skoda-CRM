@@ -112,7 +112,7 @@ export async function checkAndNotify() {
     }
 
     // Update notifiedAt timestamp in DB
-    const leadIds = unclosedLeads.map((l) => l.id);
+    const leadIds = unclosedLeads.map((l: { id: number }) => l.id);
     await prisma.lead.updateMany({
       where: { id: { in: leadIds } },
       data: { notifiedAt: new Date() },

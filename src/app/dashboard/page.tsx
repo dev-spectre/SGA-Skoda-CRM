@@ -93,7 +93,6 @@ export default function DashboardPage() {
   }, [pagination.page, search, statusFilter, branchFilter, platformFilter, sortOrder]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTimeout(() => fetchLeads(), 0);
     const fetchBranchesList = async () => {
       try {
@@ -255,21 +254,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleClearDbData = async () => {
-    if (!confirm("Are you sure you want to clear all leads from the local database? This will not delete data from your Google Sheet.")) return;
-    try {
-      const res = await fetch("/api/leads", { method: "DELETE" });
-      if (res.ok) {
-        showToast("Cleared all database leads");
-        fetchLeads();
-      } else {
-        showToast("Failed to clear database leads", "error");
-      }
-    } catch {
-      showToast("Failed to clear database leads", "error");
-    }
-  };
-
   const handleStatusChange = async (lead: Lead, newStatus: string) => {
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
@@ -357,10 +341,6 @@ export default function DashboardPage() {
       <div className="page-header">
         <h1>Dashboard</h1>
         <div className="page-actions" style={{ display: "flex", gap: 10 }}>
-          {/* <button className="btn btn-ghost" style={{ color: "#ef4444", border: "1px solid rgba(239,68,68,0.3)" }} onClick={handleClearDbData}>
-            Clear DB Data
-          </button> */}
-          
           <button className="btn btn-ghost" onClick={handleExportExcel} disabled={exportLoading}>
             {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export Excel"}
           </button>
@@ -478,7 +458,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {leads.map((lead) => (
+                {leads.map((lead: Lead) => (
                   <tr key={lead.id}>
                     <td style={{ fontWeight: 600 }}>{lead.name}</td>
                     <td style={{ fontFamily: "monospace", fontSize: 13 }}>{parsePhoneNumber(lead.phone)}</td>

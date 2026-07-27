@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
 interface SettingsData {
@@ -64,7 +64,7 @@ function SettingsContent() {
     } catch { /* silently fail */ }
   };
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
       const data = await res.json();
@@ -93,12 +93,11 @@ function SettingsContent() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
     setTimeout(() => fetchSettings(), 0);
-  }, []);
+  }, [fetchSettings]);
 
 
   const fetchSheetNames = async (spreadsheetId: string) => {

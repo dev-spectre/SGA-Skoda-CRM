@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeIntelligentMapping } from '@/lib/mapping';
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   try {
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     if (!settings?.selectedSpreadsheetId || !settings?.selectedSheetName) {

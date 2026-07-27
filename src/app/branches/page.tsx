@@ -43,7 +43,6 @@ export default function BranchesPage() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTimeout(() => fetchBranches(), 0);
   }, [fetchBranches]);
 
