@@ -11,7 +11,7 @@ export async function GET() {
       where: { platform: { not: '' } },
       orderBy: { platform: 'asc' }
     });
-    return NextResponse.json({ platforms: platforms.map(p => p.platform) });
+    return NextResponse.json({ platforms: platforms.map((p: { platform: string }) => p.platform) });
   } catch (error) {
     console.error('Platforms fetch error:', error);
     return NextResponse.json({ error: 'Failed to fetch platforms' }, { status: 500 });
