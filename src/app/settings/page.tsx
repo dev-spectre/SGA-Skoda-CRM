@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 
 interface SettingsData {
   notificationInterval: number;
+  backgroundNotificationsEnabled?: boolean;
   selectedSpreadsheetId: string | null;
   selectedSpreadsheetName: string | null;
   selectedSheetName: string | null;
@@ -30,6 +31,7 @@ function SettingsContent() {
   const [selectedSpreadsheet, setSelectedSpreadsheet] = useState("");
   const [selectedSheet, setSelectedSheet] = useState("");
   const [interval, setInterval_] = useState(5);
+  const [bgNotificationsEnabled, setBgNotificationsEnabled] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
@@ -65,6 +67,7 @@ function SettingsContent() {
         setIsGoogleLinked(data.isGoogleLinked);
         setGoogleAccountEmail(data.googleAccountEmail || null);
         setInterval_(data.settings.notificationInterval || 5);
+        setBgNotificationsEnabled(data.settings.backgroundNotificationsEnabled ?? true);
         if (data.settings.selectedSpreadsheetId) {
           setSelectedSpreadsheet(data.settings.selectedSpreadsheetId);
           setSelectedSheet(data.settings.selectedSheetName || "");
@@ -385,6 +388,43 @@ function SettingsContent() {
               Save
             </button>
           </div>
+        </div>
+        <div className="settings-row" style={{ marginBottom: 16 }}>
+          <div>
+            <label style={{ display: "block", fontWeight: 600 }}>Background System Notifications</label>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              Receive OS desktop notifications in background even if website browser tab is closed.
+            </span>
+          </div>
+          <button
+            className={`btn btn-sm ${bgNotificationsEnabled ? "btn-primary" : "btn-secondary"}`}
+            onClick={async () => {
+              const newValue = !bgNotificationsEnabled;
+              setBgNotificationsEnabled(newValue);
+              setSaving(true);
+              try {
+                const res = await fetch("/api/settings", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ backgroundNotificationsEnabled: newValue }),
+                });
+                if (res.ok) {
+                  showToast(newValue ? "Background system notifications enabled!" : "Background system notifications disabled!");
+                } else {
+                  showToast("Failed to update background notification settings", "error");
+                  setBgNotificationsEnabled(!newValue);
+                }
+              } catch {
+                showToast("Failed to update background notification settings", "error");
+                setBgNotificationsEnabled(!newValue);
+              } finally {
+                setSaving(false);
+              }
+            }}
+            disabled={saving}
+          >
+            {bgNotificationsEnabled ? "Enabled (Click to Disable)" : "Disabled (Click to Enable)"}
+          </button>
         </div>
         <div className="settings-row">
           <label>Browser Notifications</label>

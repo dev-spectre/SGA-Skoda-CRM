@@ -23,6 +23,7 @@ export async function GET() {
         selectedSpreadsheetName: null,
         selectedSheetName: null,
         notificationInterval: 5,
+        backgroundNotificationsEnabled: true,
         columnMapping: null,
         lastSyncAt: null,
       },
@@ -42,7 +43,7 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { notificationInterval, columnMapping } = body;
+    const { notificationInterval, columnMapping, backgroundNotificationsEnabled } = body;
     
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const updateData: any = {};
@@ -57,6 +58,10 @@ export async function PATCH(request: NextRequest) {
       }
       updateData.notificationInterval = interval;
     }
+
+    if (backgroundNotificationsEnabled !== undefined) {
+      updateData.backgroundNotificationsEnabled = Boolean(backgroundNotificationsEnabled);
+    }
     
     if (columnMapping !== undefined) {
       updateData.columnMapping = typeof columnMapping === 'string' 
@@ -70,8 +75,8 @@ export async function PATCH(request: NextRequest) {
       create: { id: 1, ...updateData },
     });
     
-    // Restart notification loop if interval changed
-    if (notificationInterval !== undefined) {
+    // Restart notification loop if interval or background notification settings changed
+    if (notificationInterval !== undefined || backgroundNotificationsEnabled !== undefined) {
       restartNotificationLoop().catch(console.error);
     }
     

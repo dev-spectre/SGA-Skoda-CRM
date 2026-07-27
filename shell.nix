@@ -6,6 +6,7 @@ pkgs.mkShell {
     openssl
     pkg-config
     prisma-engines
+    libnotify
   ];
 
   shellHook = ''

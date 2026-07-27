@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { parsePhoneNumber } from "@/lib/utils";
 
 export function NotificationInit() {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -36,30 +35,6 @@ export function NotificationInit() {
           // Notify dashboard components of updated lead state
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('crm-leads-updated'));
-          }
-
-          // Trigger browser notifications if enabled and leads exist
-          if (
-            data.leads && 
-            data.leads.length > 0 && 
-            typeof window !== 'undefined' && 
-            'Notification' in window &&
-            Notification.permission === 'granted' &&
-            localStorage.getItem('browser_notifications') !== 'disabled'
-          ) {
-            if (data.leads.length === 1) {
-              const lead = data.leads[0];
-              const cleanPhone = parsePhoneNumber(lead.phone);
-              new Notification('🚗 SGA Skoda CRM — Open Lead', {
-                body: `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`,
-                icon: '/favicon.ico'
-              });
-            } else {
-              new Notification('🚗 SGA Skoda CRM', {
-                body: `You have ${data.leads.length} open lead(s) needing attention!`,
-                icon: '/favicon.ico'
-              });
-            }
           }
         }
       } catch (err) {

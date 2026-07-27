@@ -35,6 +35,7 @@ model Settings {
   selectedSpreadsheetName String?
   selectedSheetName     String?
   notificationInterval  Int       @default(5)
+  backgroundNotificationsEnabled Boolean @default(true)
   columnMapping         String?
   notifiedPhones        String?   @default("[]")
   lastSyncAt            DateTime?
