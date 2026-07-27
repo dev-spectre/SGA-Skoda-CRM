@@ -392,9 +392,9 @@ function SettingsContent() {
         </div>
         <div className="settings-row" style={{ marginBottom: 16 }}>
           <div>
-            <label style={{ display: "block", fontWeight: 600 }}>Background System Notifications</label>
+            <label style={{ display: "block", fontWeight: 600 }}>Enable Notifications</label>
             <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Receive OS desktop notifications in background even if website browser tab is closed.
+              Receive desktop browser notifications while the website tab is open.
             </span>
           </div>
           <button
