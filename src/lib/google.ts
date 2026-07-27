@@ -158,7 +158,7 @@ export async function getGoogleAccountEmail(): Promise<string | null> {
       });
       return userInfo.data.email;
     }
-  } catch (err) {
+  } catch {
     // Ignore fallback failure
   }
 

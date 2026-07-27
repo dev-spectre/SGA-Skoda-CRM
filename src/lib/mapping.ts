@@ -22,7 +22,7 @@ export async function computeIntelligentMapping(
     throw new Error('Sheet is empty');
   }
 
-  const headers = (rows[0] || []).map((h: any) => String(h).toLowerCase().trim());
+  const headers = (rows[0] || []).map((h: unknown) => String(h).toLowerCase().trim());
   let maxColIndex = headers.length - 1;
 
   // Find max col index from data rows as well in case headers are sparse

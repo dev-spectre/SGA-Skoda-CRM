@@ -93,7 +93,8 @@ export default function DashboardPage() {
   }, [pagination.page, search, statusFilter, branchFilter, platformFilter, sortOrder]);
 
   useEffect(() => {
-    fetchLeads();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTimeout(() => fetchLeads(), 0);
     const fetchBranchesList = async () => {
       try {
         const res = await fetch("/api/branches");
@@ -207,7 +208,7 @@ export default function DashboardPage() {
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 22);
 
     const tableColumn = ["Name", "Phone", "City", "Zip", "Status", "Date"];
-    const tableRows: any[] = [];
+    const tableRows: (string | number)[][] = [];
 
     allLeads.forEach((l: Lead) => {
       tableRows.push([

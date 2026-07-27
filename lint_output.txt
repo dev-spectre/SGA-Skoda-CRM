@@ -1,0 +1,108 @@
+
+> sga-skoda-crm@0.1.0 lint
+> eslint
+
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/api/sheets/automap/route.ts
+  5:28  warning  'request' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/branches/page.tsx
+   46:5   error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/branches/page.tsx:46:5
+  44 |
+  45 |   useEffect(() => {
+> 46 |     fetchBranches();
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  47 |   }, [fetchBranches]);
+  48 |
+  49 |   const openAddModal = () => {  react-hooks/set-state-in-effect
+  141:22  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                react/no-unescaped-entities
+  141:33  error  `"` can be escaped with `&quot;`, `&ldquo;`, `&#34;`, `&rdquo;`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                react/no-unescaped-entities
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/dashboard/page.tsx
+   96:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/dashboard/page.tsx:96:5
+  94 |
+  95 |   useEffect(() => {
+> 96 |     fetchLeads();
+     |     ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  97 |     const fetchBranchesList = async () => {
+  98 |       try {
+  99 |         const res = await fetch("/api/branches");  react-hooks/set-state-in-effect
+  210:22  error    Unexpected any. Specify a different type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-explicit-any
+  257:9   warning  'handleClearDbData' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/settings/page.tsx
+  78:11  error    Error: Cannot access variable before it is declared
+
+`fetchSpreadsheets` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/settings/page.tsx:78:11
+  76 |         // Load spreadsheets if Google is linked
+  77 |         if (data.isGoogleLinked) {
+> 78 |           fetchSpreadsheets();
+     |           ^^^^^^^^^^^^^^^^^ `fetchSpreadsheets` accessed before it is declared
+  79 |         }
+  80 |       }
+  81 |     } catch {
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/settings/page.tsx:94:3
+   92 |
+   93 |
+>  94 |   const fetchSpreadsheets = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  95 |     try {
+      | ^^^^^^^^^
+>  96 |       const res = await fetch("/api/sheets/list");
+      | ^^^^^^^^^
+>  97 |       const data = await res.json();
+      | ^^^^^^^^^
+>  98 |       if (res.ok) {
+      | ^^^^^^^^^
+>  99 |         setSpreadsheets(data.spreadsheets || []);
+      | ^^^^^^^^^
+> 100 |       }
+      | ^^^^^^^^^
+> 101 |     } catch { /* silently fail */ }
+      | ^^^^^^^^^
+> 102 |   };
+      | ^^^^^ `fetchSpreadsheets` is declared here
+  103 |
+  104 |   const fetchSheetNames = async (spreadsheetId: string) => {
+  105 |     setLoadingSheets(true);  react-hooks/immutability
+  89:5   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+  90:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/spectre/Desktop/Projects/SGA Skoda/sga-skoda-crm/src/app/settings/page.tsx:90:5
+  88 |   useEffect(() => {
+  89 |     // eslint-disable-next-line react-hooks/exhaustive-deps
+> 90 |     fetchSettings();
+     |     ^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  91 |   }, []);
+  92 |
+  93 |                                                                                                                                                                                                                                                                                                                                    react-hooks/set-state-in-effect
+  91:6   warning  React Hook useEffect has a missing dependency: 'fetchSettings'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 react-hooks/exhaustive-deps
+
+✖ 11 problems (7 errors, 4 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

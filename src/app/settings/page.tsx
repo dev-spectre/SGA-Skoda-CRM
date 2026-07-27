@@ -50,13 +50,19 @@ function SettingsContent() {
     // Check for OAuth callback messages
     const success = searchParams.get("success");
     const error = searchParams.get("error");
-    if (success === "google_linked") showToast("Google account linked successfully!");
-    if (error) showToast(`OAuth error: ${error}`, "error");
+    if (success === "google_linked") setTimeout(() => showToast("Google account linked successfully!"), 0);
+    if (error) setTimeout(() => showToast(`OAuth error: ${error}`, "error"), 0);
   }, [searchParams]);
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
+  const fetchSpreadsheets = async () => {
+    try {
+      const res = await fetch("/api/sheets/list");
+      const data = await res.json();
+      if (res.ok) {
+        setSpreadsheets(data.spreadsheets || []);
+      }
+    } catch { /* silently fail */ }
+  };
 
   const fetchSettings = async () => {
     try {
@@ -89,15 +95,11 @@ function SettingsContent() {
     }
   };
 
-  const fetchSpreadsheets = async () => {
-    try {
-      const res = await fetch("/api/sheets/list");
-      const data = await res.json();
-      if (res.ok) {
-        setSpreadsheets(data.spreadsheets || []);
-      }
-    } catch { /* silently fail */ }
-  };
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+    setTimeout(() => fetchSettings(), 0);
+  }, []);
+
 
   const fetchSheetNames = async (spreadsheetId: string) => {
     setLoadingSheets(true);

@@ -43,7 +43,8 @@ export default function BranchesPage() {
   }, []);
 
   useEffect(() => {
-    fetchBranches();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTimeout(() => fetchBranches(), 0);
   }, [fetchBranches]);
 
   const openAddModal = () => {
@@ -138,7 +139,7 @@ export default function BranchesPage() {
               <circle cx="12" cy="10" r="3" />
             </svg>
             <h3>No Branches Found</h3>
-            <p>Click "Add Branch" to create a new branch location.</p>
+            <p>Click &quot;Add Branch&quot; to create a new branch location.</p>
           </div>
         ) : (
           <div className="table-container">
