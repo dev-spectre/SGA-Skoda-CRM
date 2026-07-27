@@ -137,9 +137,10 @@ export async function checkAndNotify() {
       leads: unclosedLeads,
       interval: intervalMinutes,
     };
-  } catch (error) {
-    console.error('Notification check failed:', error);
-    return { notified: 0, interval: 5, error: String(error) };
+  } catch (error: any) {
+    const errorMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+    console.error('Notification check failed:', errorMsg);
+    return { notified: 0, interval: 5, error: errorMsg };
   }
 }
 
@@ -175,8 +176,8 @@ export async function restartNotificationLoop() {
   startNotificationLoop(interval);
 }
 
-// Auto-start background server loop on Node server initialization
-if (typeof window === 'undefined') {
+// Auto-start background server loop ONLY on traditional long-running Node servers (not Vercel serverless)
+if (typeof window === 'undefined' && !process.env.VERCEL) {
   setTimeout(() => {
     restartNotificationLoop().catch(console.error);
   }, 2000);
