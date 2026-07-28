@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { parsePhoneNumber } from "@/lib/utils";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { parsePhoneNumber, parseBranches } from "@/lib/utils";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -13,19 +13,23 @@ interface Lead {
   phone: string;
   email?: string;
   city: string;
-  zipCode: string;
-  platform: string;
+  adname?: string;
+  branch?: string;
+  followUpDate1?: string;
+  followUpDate2?: string;
   remark: string | null;
   status: string;
-  assignedBranch?: string | null;
   createdAt: string;
 }
 
 interface Stats {
   total: number;
-  open: number;
-  closedSuccessful: number;
-  closedUnsuccessful: number;
+  pending?: number;
+  live?: number;
+  lost?: number;
+  open?: number;
+  closedSuccessful?: number;
+  closedUnsuccessful?: number;
 }
 
 interface Pagination {
@@ -35,17 +39,34 @@ interface Pagination {
   totalPages: number;
 }
 
+const formatStatusLabel = (st: string) => {
+  if (st === 'pending' || st === 'created') return 'Pending Lead';
+  if (st === 'live' || st === 'closed_successful') return 'Live Lead';
+  if (st === 'lost' || st === 'closed_unsuccessful') return 'Lost Lead';
+  return st.replace('_', ' ');
+};
+
+const toISTDateString = (isoString?: string | null) => {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(d);
+  const y = parts.find(p => p.type === 'year')?.value;
+  const m = parts.find(p => p.type === 'month')?.value;
+  const d_part = parts.find(p => p.type === 'day')?.value;
+  return `${y}-${m}-${d_part}`;
+};
+
 export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [stats, setStats] = useState<Stats>({ total: 0, open: 0, closedSuccessful: 0, closedUnsuccessful: 0 });
+  const [stats, setStats] = useState<Stats>({ total: 0, pending: 0, live: 0, lost: 0 });
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
-  const [branches, setBranches] = useState<{ id: number; name: string }[]>([]);
-  const [platformFilter, setPlatformFilter] = useState("");
-  const [platforms, setPlatforms] = useState<string[]>([]);
-  const [sortOrder, setSortOrder] = useState("desc");
+  const [primaryOrder, setPrimaryOrder] = useState<"desc" | "asc">("desc");
+  const [secondaryField, setSecondaryField] = useState("name");
+  const [secondaryOrder, setSecondaryOrder] = useState<"asc" | "desc">("asc");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -61,56 +82,125 @@ export default function DashboardPage() {
   const [deleteFromSheet, setDeleteFromSheet] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // Active update counter to pause polling while user operations are processing
+  const updatingCountRef = useRef(0);
+  const activeFetchIdRef = useRef(0);
+  const isFetchingRef = useRef(false);
+  const prefetchCache = useRef<Record<string, any>>({});
+
+  const startUpdating = () => {
+    updatingCountRef.current++;
+  };
+
+  const stopUpdating = () => {
+    updatingCountRef.current = Math.max(0, updatingCountRef.current - 1);
+  };
+
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const fetchLeads = useCallback(async () => {
+  const handleHeaderClick = (field: string) => {
+    if (field === "createdAt") {
+      setPrimaryOrder(prev => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      if (secondaryField === field) {
+        setSecondaryOrder(prev => (prev === "asc" ? "desc" : "asc"));
+      } else {
+        setSecondaryField(field);
+        setSecondaryOrder("asc");
+      }
+    }
+    setPagination(p => ({ ...p, page: 1 }));
+  };
+
+  const fetchLeads = useCallback(async (force = false) => {
+    if (updatingCountRef.current > 0 && !force) {
+      return; // Stop polling while data updates are in progress
+    }
+    
+    const fetchId = ++activeFetchIdRef.current;
+    
     try {
       const params = new URLSearchParams();
       params.set("page", pagination.page.toString());
       params.set("limit", "20");
-      params.set("sort", sortOrder);
+      params.set("primaryOrder", primaryOrder);
+      params.set("secondaryField", secondaryField);
+      params.set("secondaryOrder", secondaryOrder);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
-      if (branchFilter) params.set("branch", branchFilter);
-      if (platformFilter) params.set("platform", platformFilter);
 
-      const res = await fetch(`/api/leads?${params}`);
+      const cacheKey = params.toString();
+      const cachedData = prefetchCache.current[cacheKey];
+
+      if (cachedData && !force) {
+        setLeads(cachedData.leads);
+        setStats(cachedData.stats);
+        setPagination(prev => {
+          if (prev.total !== cachedData.pagination.total || prev.totalPages !== cachedData.pagination.totalPages) {
+             return { ...prev, total: cachedData.pagination.total, totalPages: cachedData.pagination.totalPages };
+          }
+          return prev;
+        });
+        setLoading(false);
+      }
+
+      isFetchingRef.current = true;
+      const res = await fetch(`/api/leads?${cacheKey}`);
       const data = await res.json();
+
+      if (res.ok) {
+        prefetchCache.current[cacheKey] = data;
+      }
+
+      if (activeFetchIdRef.current !== fetchId) {
+        return; // Ignore stale response
+      }
 
       if (res.ok) {
         setLeads(data.leads);
         setStats(data.stats);
-        setPagination(data.pagination);
+        
+        // Only update pagination if it actually changes total pages/records
+        // This prevents the page jumping from 2 to 1 back to 2 during polling
+        setPagination(prev => {
+          if (prev.total !== data.pagination.total || prev.totalPages !== data.pagination.totalPages) {
+             return { ...prev, total: data.pagination.total, totalPages: data.pagination.totalPages };
+          }
+          return prev;
+        });
+
+        // Prefetch adjacent pages
+        const prefetchParams = new URLSearchParams(cacheKey);
+        const currentPage = pagination.page;
+        
+        const prefetchPage = (p: number) => {
+          prefetchParams.set("page", p.toString());
+          const pKey = prefetchParams.toString();
+          if (!prefetchCache.current[pKey]) {
+            fetch(`/api/leads?${pKey}`).then(r => r.json()).then(d => {
+              if (!d.error) prefetchCache.current[pKey] = d;
+            }).catch(() => {});
+          }
+        };
+
+        prefetchPage(currentPage + 1);
+        if (currentPage > 1) prefetchPage(currentPage - 1);
       }
     } catch {
       showToast("Failed to fetch leads", "error");
     } finally {
       setLoading(false);
+      if (activeFetchIdRef.current === fetchId) {
+        isFetchingRef.current = false;
+      }
     }
-  }, [pagination.page, search, statusFilter, branchFilter, platformFilter, sortOrder]);
+  }, [pagination.page, search, statusFilter, primaryOrder, secondaryField, secondaryOrder]);
 
   useEffect(() => {
     setTimeout(() => fetchLeads(), 0);
-    const fetchBranchesList = async () => {
-      try {
-        const res = await fetch("/api/branches");
-        const data = await res.json();
-        if (res.ok) setBranches(data.branches || []);
-      } catch {}
-    };
-    fetchBranchesList();
-
-    const fetchPlatformsList = async () => {
-      try {
-        const res = await fetch("/api/platforms");
-        const data = await res.json();
-        if (res.ok) setPlatforms(data.platforms || []);
-      } catch {}
-    };
-    fetchPlatformsList();
 
     const handleLeadsUpdated = () => {
       fetchLeads();
@@ -120,9 +210,11 @@ export default function DashboardPage() {
       window.addEventListener("crm-leads-updated", handleLeadsUpdated);
     }
 
-    // Live auto-refresh dashboard data every 10 seconds
+    // Live auto-refresh dashboard data every 10 seconds (paused while updating)
     const autoRefreshInterval = setInterval(() => {
-      fetchLeads();
+      if (updatingCountRef.current === 0 && !isFetchingRef.current) {
+        fetchLeads();
+      }
     }, 10000);
 
     return () => {
@@ -139,11 +231,11 @@ export default function DashboardPage() {
       const params = new URLSearchParams();
       params.set("page", "1");
       params.set("limit", "100000");
-      params.set("sort", sortOrder);
+      params.set("primaryOrder", primaryOrder);
+      params.set("secondaryField", secondaryField);
+      params.set("secondaryOrder", secondaryOrder);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
-      if (branchFilter) params.set("branch", branchFilter);
-      if (platformFilter) params.set("platform", platformFilter);
 
       const res = await fetch(`/api/leads?${params}`);
       const data = await res.json();
@@ -156,6 +248,21 @@ export default function DashboardPage() {
     }
   };
 
+  const branches = useMemo(() => {
+    const unique = new Set<string>();
+    leads.forEach(l => {
+      if (l.branch) {
+        parseBranches(l.branch).forEach(b => unique.add(b));
+      }
+    });
+    return Array.from(unique).sort();
+  }, [leads]);
+
+  const displayedLeads = useMemo(() => {
+    if (!branchFilter) return leads;
+    return leads.filter(l => l.branch && parseBranches(l.branch).includes(branchFilter));
+  }, [leads, branchFilter]);
+
   const handleExportExcel = async () => {
     setExportLoading(true);
     const allLeads = await fetchAllFilteredLeads();
@@ -165,15 +272,28 @@ export default function DashboardPage() {
       return;
     }
 
-    const exportData = allLeads.map((l: Lead) => ({
+    const exportLeads = allLeads.filter((l: Lead) => {
+      if (!branchFilter) return true;
+      return l.branch && parseBranches(l.branch).includes(branchFilter);
+    });
+
+    if (exportLeads.length === 0) {
+      showToast("No data to export", "error");
+      setExportLoading(false);
+      return;
+    }
+
+    const exportData = exportLeads.map((l: Lead) => ({
       Name: l.name,
       Phone: l.phone,
       Email: l.email || "-",
       City: l.city || "-",
-      "Zip Code": l.zipCode || "-",
-      Platform: l.platform || "-",
+      "Ad Name": l.adname || "-",
+      Branch: l.branch ? parseBranches(l.branch).join(", ") : "-",
+      "Follow Up 1": toISTDateString(l.followUpDate1) || "-",
+      "Follow Up 2": toISTDateString(l.followUpDate2) || "-",
       "Created At": formatDate(l.createdAt),
-      Status: l.status.replace("_", " "),
+      Status: formatStatusLabel(l.status),
       Remark: l.remark || "-"
     }));
 
@@ -198,6 +318,17 @@ export default function DashboardPage() {
       return;
     }
 
+    const exportLeads = allLeads.filter((l: Lead) => {
+      if (!branchFilter) return true;
+      return l.branch && parseBranches(l.branch).includes(branchFilter);
+    });
+
+    if (exportLeads.length === 0) {
+      showToast("No data to export", "error");
+      setExportLoading(false);
+      return;
+    }
+
     const doc = new jsPDF();
     
     doc.setFontSize(16);
@@ -206,16 +337,19 @@ export default function DashboardPage() {
     doc.setTextColor(100);
     doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 22);
 
-    const tableColumn = ["Name", "Phone", "City", "Zip", "Status", "Date"];
+    const tableColumn = ["Name", "Phone", "City", "Ad Name", "Branch", "Follow Up 1", "Follow Up 2", "Status"];
     const tableRows: (string | number)[][] = [];
 
-    allLeads.forEach((l: Lead) => {
+    exportLeads.forEach((l: Lead) => {
       tableRows.push([
         l.name,
         l.phone,
         l.city || "-",
-        l.zipCode || "-",
-        l.status.replace("_", " "),
+        l.adname || "-",
+        l.branch ? parseBranches(l.branch).join(", ") : "-",
+        toISTDateString(l.followUpDate1) || "-",
+        toISTDateString(l.followUpDate2) || "-",
+        formatStatusLabel(l.status),
         new Date(l.createdAt).toLocaleDateString()
       ]);
     });
@@ -235,6 +369,9 @@ export default function DashboardPage() {
 
   const handleSync = async () => {
     setSyncing(true);
+    startUpdating();
+    activeFetchIdRef.current++; // Invalidate in-flight background fetches
+    prefetchCache.current = {}; // Clear stale prefetched pages
     try {
       const res = await fetch("/api/sheets/sync", { method: "POST" });
       const data = await res.json();
@@ -242,8 +379,9 @@ export default function DashboardPage() {
         let msg = `Synced ${data.synced} new lead(s)`;
         if (data.duplicates > 0) msg += `, updated ${data.duplicates} existing`;
         if (data.skippedLowQuality > 0) msg += ` (${data.skippedLowQuality} empty rows skipped)`;
+        if (data.skippedDuplicates > 0) msg += ` (${data.skippedDuplicates} identical sheet duplicates skipped)`;
         showToast(msg);
-        fetchLeads();
+        fetchLeads(true);
       } else {
         showToast(data.error || "Sync failed", "error");
       }
@@ -251,10 +389,70 @@ export default function DashboardPage() {
       showToast("Sync failed", "error");
     } finally {
       setSyncing(false);
+      stopUpdating();
+    }
+  };
+
+  const handleFollowUpUpdate = async (lead: Lead, field: 'followUpDate1' | 'followUpDate2', dateStr: string) => {
+    const prevLeads = [...leads];
+    startUpdating();
+    activeFetchIdRef.current++;
+    prefetchCache.current = {};
+
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, [field]: dateStr || null } : l));
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: dateStr || null }),
+      });
+      if (res.ok) {
+        showToast("Follow-up date updated");
+      } else {
+        showToast("Failed to update date", "error");
+        setLeads(prevLeads);
+      }
+    } catch {
+      showToast("Failed to update date", "error");
+      setLeads(prevLeads);
+    } finally {
+      stopUpdating();
     }
   };
 
   const handleStatusChange = async (lead: Lead, newStatus: string) => {
+    const oldStatus = lead.status;
+    const normOld = (oldStatus === 'created' ? 'pending' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus) as 'pending' | 'live' | 'lost';
+    const normNew = (newStatus === 'created' ? 'pending' : newStatus === 'closed_successful' ? 'live' : newStatus === 'closed_unsuccessful' ? 'lost' : newStatus) as 'pending' | 'live' | 'lost';
+
+    if (normOld === normNew) return;
+
+    // Snapshot previous state to revert if API request fails
+    const prevLeads = [...leads];
+    const prevStats = { ...stats };
+
+    startUpdating(); // PAUSE polling while update request is processing
+    activeFetchIdRef.current++; // Invalidate any in-flight requests so they don't overwrite this optimistic update
+    prefetchCache.current = {}; // Clear stale cache
+    
+    // 1. Optimistically update leads list in table immediately
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatus } : l));
+
+    // 2. Optimistically update stats counters immediately!
+    setStats(prev => {
+      const updated = { ...prev };
+      if (normOld === 'pending') updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
+      if (normOld === 'live') updated.live = Math.max(0, (updated.live ?? 0) - 1);
+      if (normOld === 'lost') updated.lost = Math.max(0, (updated.lost ?? 0) - 1);
+
+      if (normNew === 'pending') updated.pending = (updated.pending ?? 0) + 1;
+      if (normNew === 'live') updated.live = (updated.live ?? 0) + 1;
+      if (normNew === 'lost') updated.lost = (updated.lost ?? 0) + 1;
+
+      return updated;
+    });
+
     try {
       const res = await fetch(`/api/leads/${lead.id}`, {
         method: "PATCH",
@@ -262,60 +460,126 @@ export default function DashboardPage() {
         body: JSON.stringify({ status: newStatus }),
       });
       if (res.ok) {
-        showToast(`Status updated to ${newStatus.replace("_", " ")}`);
-        fetchLeads();
+        showToast(`Status updated to ${formatStatusLabel(newStatus)}`);
+        // KEEP the optimistic change! Do NOT revert!
       } else {
         showToast("Failed to update status", "error");
+        // REVERT back if failed!
+        setLeads(prevLeads);
+        setStats(prevStats);
       }
     } catch {
       showToast("Failed to update status", "error");
+      // REVERT back if failed!
+      setLeads(prevLeads);
+      setStats(prevStats);
+    } finally {
+      stopUpdating(); // RESUME polling after update completes (success/failure)
     }
   };
 
   const handleAddRemark = async () => {
     if (!remarkModal || !remarkText.trim()) return;
+    const isPending = remarkModal.status === "pending" || remarkModal.status === "created";
     setRemarkLoading(true);
+
+    const prevLeads = [...leads];
+    const prevStats = { ...stats };
+
+    startUpdating(); // PAUSE polling while adding remark
+    activeFetchIdRef.current++; // Invalidate in-flight requests
+    prefetchCache.current = {};
+
+    // Optimistically update table row and stats counters
+    setLeads(prev => prev.map(l => l.id === remarkModal.id ? {
+      ...l,
+      remark: remarkText.trim(),
+      status: isPending ? "live" : l.status
+    } : l));
+
+    if (isPending) {
+      setStats(prev => ({
+        ...prev,
+        pending: Math.max(0, (prev.pending ?? 0) - 1),
+        live: (prev.live ?? 0) + 1,
+      }));
+    }
+
     try {
       const res = await fetch(`/api/leads/${remarkModal.id}/remark`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ remark: remarkText }),
+        body: JSON.stringify({ remark: remarkText.trim() }),
       });
       if (res.ok) {
         showToast("Remark added successfully");
         setRemarkModal(null);
         setRemarkText("");
-        fetchLeads();
+        // KEEP the optimistic change!
       } else {
         const data = await res.json();
         showToast(data.error || "Failed to add remark", "error");
+        // REVERT back on failure!
+        setLeads(prevLeads);
+        setStats(prevStats);
       }
     } catch {
       showToast("Failed to add remark", "error");
+      // REVERT back on failure!
+      setLeads(prevLeads);
+      setStats(prevStats);
     } finally {
       setRemarkLoading(false);
+      stopUpdating(); // RESUME polling after remark update completes
     }
   };
 
   const handleDeleteLead = async () => {
     if (!deleteModal) return;
     setDeleteLoading(true);
+    const targetLead = deleteModal;
+    const prevLeads = [...leads];
+    const prevStats = { ...stats };
+
+    startUpdating(); // PAUSE polling while deleting lead
+    activeFetchIdRef.current++; // Invalidate in-flight requests
+    prefetchCache.current = {};
+
+    // Optimistically remove lead from state
+    setLeads(prev => prev.filter(l => l.id !== targetLead.id));
+    const targetStatus = (targetLead.status === 'created' ? 'pending' : targetLead.status === 'closed_successful' ? 'live' : targetLead.status === 'closed_unsuccessful' ? 'lost' : targetLead.status) as 'pending' | 'live' | 'lost';
+
+    setStats(prev => {
+      const updated = { ...prev, total: Math.max(0, (prev.total ?? 0) - 1) };
+      if (targetStatus === 'pending') updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
+      if (targetStatus === 'live') updated.live = Math.max(0, (updated.live ?? 0) - 1);
+      if (targetStatus === 'lost') updated.lost = Math.max(0, (updated.lost ?? 0) - 1);
+      return updated;
+    });
+
     try {
-      const res = await fetch(`/api/leads/${deleteModal.id}?deleteFromSheet=${deleteFromSheet}`, {
+      const res = await fetch(`/api/leads/${targetLead.id}?deleteFromSheet=${deleteFromSheet}`, {
         method: "DELETE",
       });
       if (res.ok) {
         showToast(deleteFromSheet ? "Lead deleted from DB & Google Sheet" : "Lead deleted from DB");
         setDeleteModal(null);
-        fetchLeads();
+        // KEEP the optimistic change!
       } else {
         const data = await res.json();
         showToast(data.error || "Failed to delete lead", "error");
+        // REVERT back on failure!
+        setLeads(prevLeads);
+        setStats(prevStats);
       }
     } catch {
       showToast("Failed to delete lead", "error");
+      // REVERT back on failure!
+      setLeads(prevLeads);
+      setStats(prevStats);
     } finally {
       setDeleteLoading(false);
+      stopUpdating(); // RESUME polling after deletion completes
     }
   };
 
@@ -369,16 +633,16 @@ export default function DashboardPage() {
           <div className="stat-value">{stats.total}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Open</div>
-          <div className="stat-value open">{stats.open}</div>
+          <div className="stat-label">Pending Leads</div>
+          <div className="stat-value open">{stats.pending ?? stats.open ?? 0}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Closed Successful</div>
-          <div className="stat-value success">{stats.closedSuccessful}</div>
+          <div className="stat-label">Live Leads</div>
+          <div className="stat-value success">{stats.live ?? stats.closedSuccessful ?? 0}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Closed Unsuccessful</div>
-          <div className="stat-value fail">{stats.closedUnsuccessful}</div>
+          <div className="stat-label">Lost Leads</div>
+          <div className="stat-value fail">{stats.lost ?? stats.closedUnsuccessful ?? 0}</div>
         </div>
       </div>
 
@@ -386,7 +650,7 @@ export default function DashboardPage() {
       <div className="filter-bar">
         <input
           type="text"
-          placeholder="Search by name, phone, city, zip..."
+          placeholder="Search by name, phone, city..."
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         />
@@ -395,31 +659,23 @@ export default function DashboardPage() {
           onChange={(e) => { setStatusFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         >
           <option value="">All Statuses</option>
-          <option value="created">Open / Created</option>
-          <option value="closed_successful">Closed Successful</option>
-          <option value="closed_unsuccessful">Closed Unsuccessful</option>
+          <option value="pending">Pending Leads</option>
+          <option value="live">Live Leads</option>
+          <option value="lost">Lost Leads</option>
         </select>
         <select
           value={branchFilter}
-          onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+          onChange={(e) => setBranchFilter(e.target.value)}
         >
           <option value="">All Branches</option>
-          {branches.map((b: { id: number; name: string }) => (
-            <option key={b.id} value={b.name}>{b.name}</option>
+          {branches.map((b: string) => (
+            <option key={b} value={b}>{b}</option>
           ))}
         </select>
         <select
-          value={platformFilter}
-          onChange={(e) => { setPlatformFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-        >
-          <option value="">All Platforms</option>
-          {platforms.map((p: string) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </select>
-        <select
-          value={sortOrder}
-          onChange={(e) => { setSortOrder(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+          value={primaryOrder}
+          onChange={(e) => { setPrimaryOrder(e.target.value as "desc" | "asc"); setPagination(p => ({ ...p, page: 1 })); }}
+          title="Sort by time"
         >
           <option value="desc">Newest First</option>
           <option value="asc">Oldest First</option>
@@ -445,41 +701,92 @@ export default function DashboardPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Name</th>
+                  <th onClick={() => handleHeaderClick("name")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Name">
+                    Name {secondaryField === "name" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
                   <th>Phone</th>
-                  <th>City</th>
-                  <th>Zip Code</th>
-                  <th>Platform</th>
-                  <th>Assigned Branch</th>
-                  <th>Created At</th>
-                  <th>Status</th>
+                  <th onClick={() => handleHeaderClick("city")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by City">
+                    City {secondaryField === "city" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
+                  <th onClick={() => handleHeaderClick("adname")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Ad Name">
+                    Ad Name {secondaryField === "adname" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
+                  <th onClick={() => handleHeaderClick("branch")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Branch">
+                    Branch {secondaryField === "branch" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
+                  <th onClick={() => handleHeaderClick("followUpDate1")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Follow Up">
+                    Follow Up {secondaryField === "followUpDate1" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
+                  <th onClick={() => handleHeaderClick("createdAt")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Created At">
+                    Created At {primaryOrder === "desc" ? "↓" : "↑"}
+                  </th>
+                  <th onClick={() => handleHeaderClick("status")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Status">
+                    Status {secondaryField === "status" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
+                  </th>
                   <th>Remark</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {leads.map((lead: Lead) => (
-                  <tr key={lead.id}>
+                {displayedLeads.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: "center", padding: "40px" }}>
+                      No leads found.
+                    </td>
+                  </tr>
+                ) : (
+                  displayedLeads.map((lead: Lead) => (
+                    <tr key={lead.id}>
                     <td style={{ fontWeight: 600 }}>{lead.name}</td>
                     <td style={{ fontFamily: "monospace", fontSize: 13 }}>{parsePhoneNumber(lead.phone)}</td>
                     <td>{lead.city || "—"}</td>
-                    <td>{lead.zipCode || "—"}</td>
-                    <td>{lead.platform || "—"}</td>
-                    <td style={{ fontWeight: 500, color: "var(--primary-light)" }}>{lead.assignedBranch || "—"}</td>
+                    <td>{lead.adname || "—"}</td>
+                    <td>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                        {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
+                          <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600 }}>
+                            {b}
+                          </span>
+                        )) : "—"}
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
+                          <input 
+                            type="date" 
+                            value={toISTDateString(lead.followUpDate1)} 
+                            onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
+                            className="status-select"
+                            style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
+                          />
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>2.</span>
+                          <input 
+                            type="date" 
+                            value={toISTDateString(lead.followUpDate2)} 
+                            onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
+                            className="status-select"
+                            style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
+                          />
+                        </div>
+                      </div>
+                    </td>
                     <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{formatDate(lead.createdAt)}</td>
                     <td>
                       <select
-                        className="status-select"
-                        value={lead.status}
+                        className={`status-select ${
+                          (lead.status === "pending" || lead.status === "created") ? "status-pending" :
+                          (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
+                        }`}
+                        value={lead.status === 'created' ? 'pending' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
                         onChange={(e) => handleStatusChange(lead, e.target.value)}
-                        style={{
-                          color: lead.status === "created" ? "var(--status-created)" :
-                                 lead.status === "closed_successful" ? "var(--status-success)" : "var(--status-fail)"
-                        }}
                       >
-                        <option value="created">Created</option>
-                        <option value="closed_successful">Closed Successful</option>
-                        <option value="closed_unsuccessful">Closed Unsuccessful</option>
+                        <option value="pending">Pending Lead</option>
+                        <option value="live">Live Lead</option>
+                        <option value="lost">Lost Lead</option>
                       </select>
                     </td>
                     <td className="remark-cell">
@@ -507,7 +814,8 @@ export default function DashboardPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                ))
+              )}
               </tbody>
             </table>
           </div>
@@ -540,7 +848,7 @@ export default function DashboardPage() {
             <h2>{remarkModal.remark ? "Edit" : "Add"} Remark</h2>
             <p>
               For <strong>{remarkModal.name}</strong> ({parsePhoneNumber(remarkModal.phone)})
-              {remarkModal.status === "created" && <><br /><small style={{ color: "var(--status-created)" }}>Adding a remark will automatically close this lead as successful</small></>}
+              {(remarkModal.status === "pending" || remarkModal.status === "created") && <><br /><small style={{ color: "var(--status-created)" }}>Adding a remark will automatically change status to Live Lead</small></>}
             </p>
             <textarea
               value={remarkText}

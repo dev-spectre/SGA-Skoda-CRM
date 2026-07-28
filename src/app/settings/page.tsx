@@ -40,7 +40,7 @@ function SettingsContent() {
 
   // Column mapping
   const [mapping, setMapping] = useState<{ [key: string]: number }>({
-    name: 0, phone: 1, city: 2, zipCode: 3, platform: 4, createdAt: 5, remark: 6, status: 7, branch: 8
+    name: 0, phone: 1, email: 2, city: 3, createdAt: 4, remark: 5, status: 6, adname: 7, branch: 8, followUpDate1: 9, followUpDate2: 10
   });
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
@@ -85,7 +85,8 @@ function SettingsContent() {
         }
         if (data.settings.columnMapping) {
           try {
-            setMapping(JSON.parse(data.settings.columnMapping));
+            const parsed = JSON.parse(data.settings.columnMapping);
+            setMapping(prev => ({ ...prev, ...parsed }));
           } catch { /* use defaults */ }
         }
         // Load spreadsheets if Google is linked
@@ -455,40 +456,6 @@ function SettingsContent() {
             </div>
           </div>
         )}
-      </div>
-
-      {/* Webhooks & Instant Sync */}
-      <div className="settings-section">
-        <h2>Webhooks & Instant Automation</h2>
-        <p className="section-desc">Automate instant lead checks using background polling or HTTP webhooks.</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12, fontSize: 13, background: "var(--bg-hover)", padding: 16, borderRadius: 8 }}>
-          <div>
-            <strong>1. Automatic Background Polling (Active)</strong>
-            <p style={{ margin: "4px 0 0", color: "var(--text-muted)" }}>
-              The CRM automatically background-syncs your Google Sheet every <strong>{interval} minute(s)</strong> and notifies you immediately when new leads arrive.
-            </p>
-          </div>
-          <hr style={{ borderColor: "var(--border-color)", margin: "8px 0" }} />
-          <div>
-            <strong>2. Sheet Trigger Webhook URL</strong>
-            <p style={{ margin: "4px 0 8px", color: "var(--text-muted)" }}>
-              Send a POST request to this endpoint to trigger an instant sheet sync anytime:
-            </p>
-            <code style={{ background: "var(--bg-main)", padding: "6px 12px", borderRadius: 4, display: "block", color: "var(--text-main)" }}>
-              {typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/sheets
-            </code>
-          </div>
-          <hr style={{ borderColor: "var(--border-color)", margin: "8px 0" }} />
-          <div>
-            <strong>3. Single Lead Ingestion Webhook URL</strong>
-            <p style={{ margin: "4px 0 8px", color: "var(--text-muted)" }}>
-              Send a POST JSON payload (e.g. from Meta Ads / Zapier / Make) to immediately create a lead and trigger notifications:
-            </p>
-            <code style={{ background: "var(--bg-main)", padding: "6px 12px", borderRadius: 4, display: "block", color: "var(--text-main)" }}>
-              {typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/lead
-            </code>
-          </div>
-        </div>
       </div>
 
       {toast && <div className={`toast ${toast.type}`}>{toast.message}</div>}

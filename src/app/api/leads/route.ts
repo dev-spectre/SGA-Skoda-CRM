@@ -6,14 +6,32 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const search = searchParams.get('search') || '';
     const status = searchParams.get('status') || '';
-    const platform = searchParams.get('platform') || '';
-    const sort = searchParams.get('sort') || 'desc';
-    const city = searchParams.get('city') || '';
     const branch = searchParams.get('branch') || '';
+    const primaryOrder = (searchParams.get('primaryOrder') || searchParams.get('primarySort') || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
+
+    let secondaryField = searchParams.get('secondaryField') || searchParams.get('sortBy') || searchParams.get('sortField') || 'name';
+    if (secondaryField === 'createdAt' || secondaryField === 'date') {
+      secondaryField = 'name';
+    }
+
+    const rawSecondaryOrder = searchParams.get('secondaryOrder') || searchParams.get('sortOrder') || searchParams.get('sort') || 'asc';
+    const secondaryOrder: 'asc' | 'desc' = rawSecondaryOrder.toLowerCase() === 'desc' ? 'desc' : 'asc';
+
+    const city = searchParams.get('city') || '';
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
-    
+
+    const validFields = ['name', 'city', 'adname', 'branch', 'status', 'phone', 'email', 'followUpDate1', 'followUpDate2'];
+    if (!validFields.includes(secondaryField)) {
+      secondaryField = 'name';
+    }
+
+    const orderBy = [
+      { createdAt: primaryOrder as 'asc' | 'desc' },
+      { [secondaryField]: secondaryOrder },
+    ];
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {};
     
@@ -23,16 +41,21 @@ export async function GET(request: NextRequest) {
         { phone: { contains: search } },
         { email: { contains: search } },
         { city: { contains: search } },
-        { zipCode: { contains: search } },
+        { adname: { contains: search } },
+        { branch: { contains: search } },
       ];
     }
     
     if (status) {
-      where.status = status;
-    }
-    
-    if (platform) {
-      where.platform = platform;
+      if (status === 'pending' || status === 'created') {
+        where.status = { in: ['pending', 'created'] };
+      } else if (status === 'live' || status === 'closed_successful') {
+        where.status = { in: ['live', 'closed_successful'] };
+      } else if (status === 'lost' || status === 'closed_unsuccessful') {
+        where.status = { in: ['lost', 'closed_unsuccessful'] };
+      } else {
+        where.status = status;
+      }
     }
     
     if (city) {
@@ -40,25 +63,41 @@ export async function GET(request: NextRequest) {
     }
     
     if (branch) {
-      where.assignedBranch = branch;
+      where.branch = { contains: branch, mode: 'insensitive' };
     }
     
-    const [leads, total] = await Promise.all([
+    const [leads, total, statusCounts] = await Promise.all([
       prisma.lead.findMany({
         where,
-        orderBy: { createdAt: sort as 'asc' | 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),
       prisma.lead.count({ where }),
+      prisma.lead.groupBy({
+        by: ['status'],
+        _count: {
+          status: true,
+        },
+      }),
     ]);
     
-    const [totalLeads, openLeads, closedSuccessful, closedUnsuccessful] = await Promise.all([
-      prisma.lead.count(),
-      prisma.lead.count({ where: { status: 'created' } }),
-      prisma.lead.count({ where: { status: 'closed_successful' } }),
-      prisma.lead.count({ where: { status: 'closed_unsuccessful' } }),
-    ]);
+    let totalLeads = 0;
+    let pendingLeads = 0;
+    let liveLeads = 0;
+    let lostLeads = 0;
+
+    statusCounts.forEach((group) => {
+      const count = group._count.status;
+      totalLeads += count;
+      if (['pending', 'created'].includes(group.status)) {
+        pendingLeads += count;
+      } else if (['live', 'closed_successful'].includes(group.status)) {
+        liveLeads += count;
+      } else if (['lost', 'closed_unsuccessful'].includes(group.status)) {
+        lostLeads += count;
+      }
+    });
     
     return NextResponse.json({
       leads,
@@ -70,9 +109,12 @@ export async function GET(request: NextRequest) {
       },
       stats: {
         total: totalLeads,
-        open: openLeads,
-        closedSuccessful,
-        closedUnsuccessful,
+        pending: pendingLeads,
+        live: liveLeads,
+        lost: lostLeads,
+        open: pendingLeads,
+        closedSuccessful: liveLeads,
+        closedUnsuccessful: lostLeads,
       },
     });
   } catch (error) {

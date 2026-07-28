@@ -5,8 +5,10 @@ export interface ColumnMapping {
   phone: number;
   email: number;
   city: number;
-  zipCode: number;
-  platform: number;
+  adname: number;
+  branch: number;
+  followUpDate1: number;
+  followUpDate2: number;
   createdAt: number;
   remark: number;
   status: number;
@@ -39,8 +41,10 @@ export async function computeIntelligentMapping(
     phone: [/^phone$/i, /^mobile$/i, /^contact\s?_?no/i, /phone|mobile|contact|cell|number/i],
     email: [/^email$/i, /^e-?mail\s?address$/i, /email|mail/i],
     city: [/^city$/i, /^location$/i, /city|location|town/i],
-    zipCode: [/^zip\s?_?code$/i, /^pin\s?_?code$/i, /zip|pin|postal/i],
-    platform: [/^platform$/i, /^source$/i, /platform|source|medium|campaign/i],
+    adname: [/^ad\s?_?name$/i, /^campaign\s?_?name$/i, /ad\s?name|campaign\s?name/i],
+    branch: [/^branch$/i, /^office$/i, /branch|office/i],
+    followUpDate1: [/^follow\s?up\s?date\s?1$/i, /^follow\s?up\s?1$/i, /follow up 1|date 1/i],
+    followUpDate2: [/^follow\s?up\s?date\s?2$/i, /^follow\s?up\s?2$/i, /follow up 2|date 2/i],
     createdAt: [/^created\s?_?at$/i, /^date$/i, /^timestamp$/i, /date|time|created/i],
     remark: [/^remark$/i, /^notes?$/i, /^comments?$/i, /remark|notes|comments/i],
     status: [/^status$/i, /^state$/i, /status|state/i],
@@ -78,17 +82,6 @@ export async function computeIntelligentMapping(
     }
   }
 
-  if (mapping.zipCode === undefined) {
-    for (let c = 0; c <= maxColIndex; c++) {
-      if (Object.values(mapping).includes(c)) continue;
-      const isZip = dataRows.some((row: unknown[]) => {
-        const val = String((row as unknown[])[c] || '').trim();
-        return /^\d{5,6}$/.test(val);
-      });
-      if (isZip) { mapping.zipCode = c; break; }
-    }
-  }
-
   if (mapping.createdAt === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
       if (Object.values(mapping).includes(c)) continue;
@@ -115,8 +108,10 @@ export async function computeIntelligentMapping(
   if (mapping.phone === undefined) mapping.phone = 1;
   if (mapping.email === undefined) mapping.email = 2;
   if (mapping.city === undefined) assignFreeColumn('city', 'City');
-  if (mapping.zipCode === undefined) assignFreeColumn('zipCode', 'Zip Code');
-  if (mapping.platform === undefined) assignFreeColumn('platform', 'Platform');
+  if (mapping.adname === undefined) assignFreeColumn('adname', 'Ad Name');
+  if (mapping.branch === undefined) assignFreeColumn('branch', 'Branch');
+  if (mapping.followUpDate1 === undefined) assignFreeColumn('followUpDate1', 'Follow Up Date 1');
+  if (mapping.followUpDate2 === undefined) assignFreeColumn('followUpDate2', 'Follow Up Date 2');
   if (mapping.createdAt === undefined) assignFreeColumn('createdAt', 'Created At');
   
   assignFreeColumn('remark', 'Remark');

@@ -1,18 +1,19 @@
 import { prisma } from '@/lib/prisma';
 import { getSheetData } from '@/lib/google';
-import { parsePhoneNumber, sanitizeField, parseZipCode } from '@/lib/utils';
+import { parsePhoneNumber, sanitizeField } from '@/lib/utils';
 
 interface ColumnMapping {
   name: number;
   phone: number;
   email?: number;
   city: number;
-  zipCode: number;
-  platform: number;
+  adname?: number;
+  branch?: number;
+  followUpDate1?: number;
+  followUpDate2?: number;
   createdAt: number;
   remark: number;
   status: number;
-  branch?: number;
 }
 
 const DEFAULT_MAPPING: ColumnMapping = {
@@ -20,11 +21,13 @@ const DEFAULT_MAPPING: ColumnMapping = {
   phone: 1,
   email: 2,
   city: 3,
-  zipCode: 4,
-  platform: 5,
-  createdAt: 6,
-  remark: 7,
-  status: 8,
+  createdAt: 4,
+  remark: 5,
+  status: 6,
+  adname: 7,
+  branch: 8,
+  followUpDate1: 9,
+  followUpDate2: 10,
 };
 
 function isLowQualityLead(name: string, phone: string, email: string, city: string): boolean {
@@ -49,11 +52,8 @@ export async function deduplicateDatabaseLeads() {
       const cleanName = (lead.name || '').trim().toLowerCase();
       const cleanEmail = (lead.email || '').trim().toLowerCase();
       const cleanCity = (lead.city || '').trim().toLowerCase();
-      const cleanZip = (lead.zipCode || '').trim().toLowerCase();
-      const cleanPlatform = (lead.platform || '').trim().toLowerCase();
-
       // Fingerprint of all core lead columns
-      const leadFingerprint = `${cleanName}|${cleanPhone}|${cleanEmail}|${cleanCity}|${cleanZip}|${cleanPlatform}`;
+      const leadFingerprint = `${cleanName}|${cleanPhone}|${cleanEmail}|${cleanCity}`;
 
       if (seenIdenticalLeads.has(leadFingerprint)) {
         duplicateIdsToDelete.push(lead.id);
@@ -75,55 +75,114 @@ export async function deduplicateDatabaseLeads() {
 
 export async function performSheetSync() {
   const settings = await prisma.settings.findUnique({ where: { id: 1 } });
-  
+
   if (!settings?.selectedSpreadsheetId || !settings?.selectedSheetName || !settings?.googleAccessToken) {
-    return { synced: 0, duplicates: 0, skippedLowQuality: 0, total: 0, error: 'Settings not configured' };
+    return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0, error: 'Settings not configured' };
   }
 
-  const mapping: ColumnMapping = settings.columnMapping 
+  const mapping: ColumnMapping = settings.columnMapping
     ? JSON.parse(settings.columnMapping)
     : DEFAULT_MAPPING;
-  
+
   const rows = await getSheetData(settings.selectedSpreadsheetId, settings.selectedSheetName);
-  
+
   if (!rows || rows.length <= 1) {
     await deduplicateDatabaseLeads();
-    return { synced: 0, duplicates: 0, skippedLowQuality: 0, total: 0 };
+    return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0 };
   }
-  
+
   const dataRows = rows.slice(1);
   let synced = 0;
   let duplicates = 0;
   let skippedLowQuality = 0;
-  const activeFingerprints: string[] = [];
+  let skippedDuplicates = 0;
+
+  // 1. Fetch DB State in Bulk
+  const existingLeads = await prisma.lead.findMany({
+    select: { id: true, fingerprint: true, remark: true, status: true, name: true, phone: true, email: true, city: true, adname: true, branch: true, followUpDate1: true, followUpDate2: true, sheetRow: true },
+  });
+
+  const existingByFingerprint = new Map<string, typeof existingLeads[0]>();
+  const existingByPhone = new Map<string, typeof existingLeads[0]>();
+  const existingByRow = new Map<number, typeof existingLeads[0]>();
+  const activeDbIds = new Set<number>();
+
+  for (const lead of existingLeads) {
+    if (lead.fingerprint && !existingByFingerprint.has(lead.fingerprint)) {
+      existingByFingerprint.set(lead.fingerprint, lead);
+    }
+    const cleanPhone = parsePhoneNumber(lead.phone);
+    if (cleanPhone && !existingByPhone.has(cleanPhone)) {
+      existingByPhone.set(cleanPhone, lead);
+    }
+    if (lead.sheetRow && !existingByRow.has(lead.sheetRow)) {
+      existingByRow.set(lead.sheetRow, lead);
+    }
+  }
+
   const fingerprintCounts = new Map<string, number>();
-  
+  const seenFullData = new Set<string>();
+  const currentSheetPhones = new Set<string>();
+
+  const toCreate: any[] = [];
+  const toUpdate: { id: number; data: any }[] = [];
+
+  // 2. In-Memory Reconciliation
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
     const rowNumber = i + 2;
-    
+
     const rawName = (row[mapping.name] || '').toString();
     const rawPhone = (row[mapping.phone] || '').toString();
     const rawEmail = mapping.email !== undefined ? (row[mapping.email] || '').toString() : '';
     const rawCity = (row[mapping.city] || '').toString();
 
-    // Sanitize fields
     const name = sanitizeField(rawName);
     const phone = parsePhoneNumber(rawPhone);
     const email = sanitizeField(rawEmail);
     const city = sanitizeField(rawCity);
-    
+
+    // const platform = sanitizeField((row[mapping.platform] || '').toString());
+    const rawAdname = mapping.adname !== undefined ? (row[mapping.adname] || '').toString() : '';
+    const rawBranch = mapping.branch !== undefined ? (row[mapping.branch] || '').toString() : '';
+    const rawFollowUpDate1 = mapping.followUpDate1 !== undefined ? (row[mapping.followUpDate1] || '').toString() : '';
+    const rawFollowUpDate2 = mapping.followUpDate2 !== undefined ? (row[mapping.followUpDate2] || '').toString() : '';
+    const adname = sanitizeField(rawAdname);
+    const branch = sanitizeField(rawBranch);
+
+    let followUpDate1: Date | null = null;
+    if (rawFollowUpDate1) {
+      const parsed = new Date(rawFollowUpDate1);
+      if (!isNaN(parsed.getTime())) followUpDate1 = parsed;
+    }
+
+    let followUpDate2: Date | null = null;
+    if (rawFollowUpDate2) {
+      const parsed = new Date(rawFollowUpDate2);
+      if (!isNaN(parsed.getTime())) followUpDate2 = parsed;
+    }
+
+    if (phone) {
+      currentSheetPhones.add(phone);
+    }
+
     if (isLowQualityLead(name, phone, email, city)) {
       skippedLowQuality++;
       continue;
     }
-    
-    const zipCode = parseZipCode((row[mapping.zipCode] || '').toString());
-    const platform = sanitizeField((row[mapping.platform] || '').toString());
+
     const createdAtRaw = (row[mapping.createdAt] || '').toString().trim();
     const remark = sanitizeField((row[mapping.remark] || '').toString()) || null;
     const statusRaw = (row[mapping.status] || '').toString().trim().toLowerCase();
-    
+
+    // Deduplicate exact identical rows from the sheet
+    const fullDataHash = `${name}|${phone}|${email}|${city}|${adname}|${branch}|${createdAtRaw}|${remark || ''}|${statusRaw}|${followUpDate1 ? followUpDate1.getTime() : ''}|${followUpDate2 ? followUpDate2.getTime() : ''}`;
+    if (seenFullData.has(fullDataHash)) {
+      skippedDuplicates++;
+      continue;
+    }
+    seenFullData.add(fullDataHash);
+
     let createdAt = new Date();
     if (createdAtRaw) {
       const parsed = new Date(createdAtRaw);
@@ -131,117 +190,146 @@ export async function performSheetSync() {
         createdAt = parsed;
       }
     }
-    
-    let status = 'created';
-    if (statusRaw.includes('successful') || statusRaw === 'closed_successful') {
-      status = 'closed_successful';
-    } else if (statusRaw.includes('unsuccessful') || statusRaw === 'closed_unsuccessful') {
-      status = 'closed_unsuccessful';
-    } else if (statusRaw === 'closed') {
-      status = 'closed_successful';
+
+    let status = 'pending';
+    if (statusRaw.includes('live') || statusRaw.includes('successful') || statusRaw === 'closed_successful' || statusRaw === 'closed') {
+      status = 'live';
+    } else if (statusRaw.includes('lost') || statusRaw.includes('unsuccessful') || statusRaw === 'closed_unsuccessful') {
+      status = 'lost';
     }
-    
-    const baseFingerprint = `${phone}|${platform}|${createdAtRaw}`;
+
+    const baseFingerprint = `${phone}|${createdAtRaw}`;
     const count = fingerprintCounts.get(baseFingerprint) || 0;
     fingerprintCounts.set(baseFingerprint, count + 1);
-    
-    const fingerprint = `${baseFingerprint}|${count}`;
-    activeFingerprints.push(fingerprint);
-    
-    try {
-      let existing = await prisma.lead.findFirst({
-        where: { fingerprint }
-      });
 
-      // Migration fallback for leads synced before fingerprints were added or occurrence added
-      if (!existing && count === 0) {
-        existing = await prisma.lead.findFirst({
-          where: {
+    const fingerprint = `${baseFingerprint}|${count}`;
+
+    // Multi-stage fallback lead matching
+    let existing = existingByFingerprint.get(fingerprint);
+    if (!existing && phone) {
+      existing = existingByPhone.get(phone);
+    }
+    if (!existing && rowNumber) {
+      existing = existingByRow.get(rowNumber);
+    }
+
+    if (existing) {
+      activeDbIds.add(existing.id);
+
+      const finalRemark = remark || existing.remark;
+      const normalizedExistingStatus = existing.status === 'created' ? 'pending' : existing.status === 'closed_successful' ? 'live' : existing.status === 'closed_unsuccessful' ? 'lost' : existing.status;
+      const finalStatus = normalizedExistingStatus || status || 'pending';
+
+      // Only queue DB update if data actually changed
+      if (
+        existing.name !== name ||
+        existing.phone !== phone ||
+        existing.email !== email ||
+        existing.city !== city ||
+        existing.adname !== adname ||
+        existing.branch !== branch ||
+        existing.followUpDate1?.getTime() !== followUpDate1?.getTime() ||
+        existing.followUpDate2?.getTime() !== followUpDate2?.getTime() ||
+        existing.remark !== finalRemark ||
+        existing.status !== finalStatus ||
+        existing.sheetRow !== rowNumber
+      ) {
+        toUpdate.push({
+          id: existing.id,
+          data: {
+            name,
             phone,
-            platform,
-            OR: [
-              { fingerprint: null },
-              { fingerprint: baseFingerprint }
-            ]
+            email,
+            city,
+            adname,
+            branch,
+            followUpDate1,
+            followUpDate2,
+            remark: finalRemark,
+            status: finalStatus,
+            sheetRow: rowNumber,
+            sheetId: settings.selectedSpreadsheetId,
+            fingerprint,
           }
         });
       }
-
-      if (existing) {
-        await prisma.lead.update({
-          where: { id: existing.id },
-          data: {
-            name,
-            phone,
-            email,
-            city,
-            zipCode,
-            platform,
-            remark: remark || existing.remark,
-            status: existing.status !== 'created' ? existing.status : status,
-            sheetRow: rowNumber,
-            sheetId: settings.selectedSpreadsheetId,
-            fingerprint,
-          },
-        });
-        duplicates++;
-      } else {
-        await prisma.lead.create({
-          data: {
-            name,
-            phone,
-            email,
-            city,
-            zipCode,
-            platform,
-            createdAt,
-            remark,
-            status,
-            sheetRow: rowNumber,
-            sheetId: settings.selectedSpreadsheetId,
-            fingerprint,
-          },
-        });
-        synced++;
-      }
-    } catch (err) {
-      console.error(`Failed to sync row ${rowNumber}:`, err);
+      duplicates++;
+    } else {
+      toCreate.push({
+        name,
+        phone,
+        email,
+        city,
+        adname,
+        branch,
+        followUpDate1,
+        followUpDate2,
+        createdAt,
+        remark,
+        status,
+        sheetRow: rowNumber,
+        sheetId: settings.selectedSpreadsheetId,
+        fingerprint,
+      });
+      synced++;
     }
   }
-  
-  // Single Source of Truth: Cleanup any lead not present in the current Google Sheet
-  if (activeFingerprints.length > 0) {
+
+  // 3. Execute Bulk DB Operations
+  // Create New Leads
+  const chunkSize = 2000;
+  for (let i = 0; i < toCreate.length; i += chunkSize) {
+    const chunk = toCreate.slice(i, i + chunkSize);
+    await prisma.lead.createMany({ data: chunk });
+  }
+
+  // Update Existing Leads in chunks of 50 concurrent updates
+  for (let i = 0; i < toUpdate.length; i += 50) {
+    const updatePromises = toUpdate.slice(i, i + 50).map(u =>
+      prisma.lead.update({
+        where: { id: u.id },
+        data: u.data
+      }).catch(e => {
+        console.error(`Update failed for id ${u.id}:`, e);
+      })
+    );
+    await Promise.all(updatePromises);
+  }
+
+  // 4. Safe Cleanup
+  // Only delete leads that have a fingerprint, are NOT active matched leads,
+  // AND whose phone number is not present in the current spreadsheet!
+  const idsToDelete = existingLeads
+    .filter(l => {
+      if (!l.fingerprint) return false;
+      if (activeDbIds.has(l.id)) return false;
+      const cleanLeadPhone = parsePhoneNumber(l.phone);
+      if (cleanLeadPhone && currentSheetPhones.has(cleanLeadPhone)) return false;
+      return true;
+    })
+    .map(l => l.id);
+
+  for (let i = 0; i < idsToDelete.length; i += chunkSize) {
+    const chunk = idsToDelete.slice(i, i + chunkSize);
     await prisma.lead.deleteMany({
-      where: {
-        OR: [
-          { fingerprint: { notIn: activeFingerprints } },
-          { fingerprint: null }
-        ]
-      }
+      where: { id: { in: chunk } }
     });
   }
 
-  // Assign nearest branch to any leads without one
-  const unassignedLeads = await prisma.lead.findMany({
-    where: { assignedBranch: null }
-  });
-  
-  if (unassignedLeads.length > 0) {
-    const { assignNearestBranchToLead } = await import('./assignment');
-    for (const l of unassignedLeads) {
-      await assignNearestBranchToLead(l.id);
-    }
+  if (idsToDelete.length > 0) {
+    console.log(`🧹 Safe Cleanup: Removed ${idsToDelete.length} obsolete leads.`);
   }
 
   await prisma.settings.update({
     where: { id: 1 },
     data: { lastSyncAt: new Date() },
   });
-  
+
   return {
     synced,
     duplicates,
     skippedLowQuality,
+    skippedDuplicates,
     total: dataRows.length,
   };
 }

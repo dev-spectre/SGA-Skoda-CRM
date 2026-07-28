@@ -393,46 +393,57 @@ export async function findAndWriteToSheetRow(
 
   let targetRowIndex: number | null = null;
 
-  // 1. Search by exact phone match if available
-  if (cleanLeadPhone) {
-    for (let i = 1; i < rows.length; i++) {
-      const r = rows[i];
-      const rPhone = parsePhoneNumber((r[mapping.phone] || '').toString().trim());
-      const rName = (r[mapping.name] || '').toString().trim().toLowerCase();
-      if (rPhone === cleanLeadPhone && (!cleanLeadName || rName === cleanLeadName)) {
-        targetRowIndex = i + 1;
-        break;
-      }
-    }
-  }
-
-  // 2. If not found by phone, search by name + email/city
-  if (!targetRowIndex && cleanLeadName) {
-    for (let i = 1; i < rows.length; i++) {
-      const r = rows[i];
-      const rName = (r[mapping.name] || '').toString().trim().toLowerCase();
-      const rEmail = mapping.email !== undefined ? (r[mapping.email] || '').toString().trim().toLowerCase() : '';
-      if (rName === cleanLeadName && (!cleanLeadEmail || rEmail === cleanLeadEmail)) {
-        targetRowIndex = i + 1;
-        break;
-      }
-    }
-  }
-
-  // 3. Fallback to cached sheetRow if row at sheetRow still matches lead
-  if (!targetRowIndex && lead.sheetRow && lead.sheetRow <= rows.length) {
+  // 1. Check cached sheetRow first if available and valid
+  if (lead.sheetRow && lead.sheetRow <= rows.length && lead.sheetRow >= 2) {
     const r = rows[lead.sheetRow - 1];
     if (r) {
-      const rName = (r[mapping.name] || '').toString().trim().toLowerCase();
       const rPhone = parsePhoneNumber((r[mapping.phone] || '').toString().trim());
-      if ((cleanLeadPhone && rPhone === cleanLeadPhone) || (cleanLeadName && rName === cleanLeadName)) {
+      const rName = (r[mapping.name] || '').toString().trim().toLowerCase();
+      if ((cleanLeadPhone && rPhone === cleanLeadPhone) || (cleanLeadName && (rName.includes(cleanLeadName) || cleanLeadName.includes(rName)))) {
         targetRowIndex = lead.sheetRow;
       }
     }
   }
 
+  // 2. Search by exact phone match across all rows
+  if (!targetRowIndex && cleanLeadPhone) {
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const rPhone = parsePhoneNumber((r[mapping.phone] || '').toString().trim());
+      if (rPhone === cleanLeadPhone) {
+        targetRowIndex = i + 1;
+        break;
+      }
+    }
+  }
+
+  // 3. Fallback to name search
+  if (!targetRowIndex && cleanLeadName) {
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const rName = (r[mapping.name] || '').toString().trim().toLowerCase();
+      if (rName === cleanLeadName) {
+        targetRowIndex = i + 1;
+        break;
+      }
+    }
+  }
+
   if (targetRowIndex) {
-    await updateSheetRow(spreadsheetId, sheetName, targetRowIndex, updates);
+    // Format status values to user-friendly labels for the spreadsheet
+    const formattedUpdates = updates.map(u => {
+      if (mapping.status !== undefined && u.col === mapping.status) {
+        const val = u.value.toLowerCase();
+        let formatted = u.value;
+        if (val === 'pending' || val === 'created') formatted = 'Pending Lead';
+        else if (val === 'live' || val === 'closed_successful') formatted = 'Live Lead';
+        else if (val === 'lost' || val === 'closed_unsuccessful') formatted = 'Lost Lead';
+        return { col: u.col, value: formatted };
+      }
+      return u;
+    });
+
+    await updateSheetRow(spreadsheetId, sheetName, targetRowIndex, formattedUpdates);
     await prisma.lead.update({
       where: { id: lead.id },
       data: { sheetRow: targetRowIndex },

@@ -116,7 +116,7 @@ export async function checkAndNotify() {
       const cleanPhone = parsePhoneNumber(lead.phone);
       await sendSystemNotification(
         '🚗 SGA Skoda CRM — Open Lead',
-        `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'} — ${lead.platform || 'N/A'}`
+        `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`
       );
     } else {
       await sendSystemNotification(

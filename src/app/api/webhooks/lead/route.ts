@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { parsePhoneNumber, parseZipCode } from '@/lib/utils';
+import { parsePhoneNumber } from '@/lib/utils';
 import { checkAndNotify } from '@/lib/notifications';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, phone, email, city, zipCode, platform, remark } = body;
+    const { name, phone, email, city, adname, branch, followUpDate1, followUpDate2, remark } = body;
     
     const parsedName = (name || '').toString().trim();
     const rawPhone = (phone || '').toString().trim();
@@ -30,17 +30,15 @@ export async function POST(request: NextRequest) {
         phone: parsedPhone,
         email: parsedEmail,
         city: parsedCity,
-        zipCode: parseZipCode(zipCode),
-        platform: (platform || 'Webhook').toString().trim(),
+        adname: adname ? String(adname).trim() : '',
+        branch: branch ? String(branch).trim() : '',
+        followUpDate1: followUpDate1 ? new Date(followUpDate1) : null,
+        followUpDate2: followUpDate2 ? new Date(followUpDate2) : null,
         remark: remark ? String(remark).trim() : null,
-        status: 'created',
+        status: 'pending',
         sheetId,
       },
     });
-    
-    // Auto-assign nearest branch if applicable
-    const { assignNearestBranchToLead } = await import('@/lib/assignment');
-    await assignNearestBranchToLead(lead.id);
 
     // Trigger notification check immediately
     checkAndNotify().catch(console.error);

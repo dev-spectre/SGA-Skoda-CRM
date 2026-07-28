@@ -10,7 +10,7 @@ export async function PATCH(
     const { id } = await params;
     const leadId = parseInt(id);
     const body = await request.json();
-    const { status, remark } = body;
+    const { status, remark, followUpDate1, followUpDate2 } = body;
     
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) {
@@ -21,17 +21,28 @@ export async function PATCH(
     const updateData: any = {};
     
     if (status !== undefined) {
-      if (!['created', 'closed_successful', 'closed_unsuccessful'].includes(status)) {
+      if (!['pending', 'live', 'lost', 'created', 'closed_successful', 'closed_unsuccessful'].includes(status)) {
         return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
       }
-      updateData.status = status;
+      let targetStatus = status;
+      if (status === 'created') targetStatus = 'pending';
+      if (status === 'closed_successful') targetStatus = 'live';
+      if (status === 'closed_unsuccessful') targetStatus = 'lost';
+      updateData.status = targetStatus;
     }
     
     if (remark !== undefined) {
       updateData.remark = remark;
-      if (!status && lead.status === 'created') {
-        updateData.status = 'closed_successful';
+      if (!status && (lead.status === 'created' || lead.status === 'pending')) {
+        updateData.status = 'live';
       }
+    }
+    
+    if (followUpDate1 !== undefined) {
+      updateData.followUpDate1 = followUpDate1 ? new Date(followUpDate1.includes('T') ? followUpDate1 : `${followUpDate1}T12:00:00Z`) : null;
+    }
+    if (followUpDate2 !== undefined) {
+      updateData.followUpDate2 = followUpDate2 ? new Date(followUpDate2.includes('T') ? followUpDate2 : `${followUpDate2}T12:00:00Z`) : null;
     }
     
     const updatedLead = await prisma.lead.update({
@@ -39,7 +50,7 @@ export async function PATCH(
       data: updateData,
     });
     
-    // Write back to Google Sheet by dynamically matching lead name and phone
+    // Wait for Google Sheet update to ensure it completes in serverless environments
     try {
       const settings = await prisma.settings.findUnique({ where: { id: 1 } });
       const spreadsheetId = lead.sheetId || settings?.selectedSpreadsheetId;
@@ -51,16 +62,27 @@ export async function PATCH(
           : { remark: 7, status: 8 };
         
         const updates: { col: number; value: string }[] = [];
-        if (remark !== undefined) updates.push({ col: mapping.remark, value: remark || '' });
-        const finalStatus = updateData.status || lead.status;
-        updates.push({ col: mapping.status, value: finalStatus });
-        
-        await findAndWriteToSheetRow(spreadsheetId, sheetName, lead, updates);
+        if (remark !== undefined && mapping.remark !== undefined) {
+          updates.push({ col: mapping.remark, value: remark || '' });
+        }
+        if (followUpDate1 !== undefined && mapping.followUpDate1 !== undefined) {
+          updates.push({ col: mapping.followUpDate1, value: followUpDate1 || '' });
+        }
+        if (followUpDate2 !== undefined && mapping.followUpDate2 !== undefined) {
+          updates.push({ col: mapping.followUpDate2, value: followUpDate2 || '' });
+        }
+        if (mapping.status !== undefined) {
+          const finalStatus = updateData.status || lead.status;
+          updates.push({ col: mapping.status, value: finalStatus });
+        }
+        if (updates.length > 0) {
+          await findAndWriteToSheetRow(spreadsheetId, sheetName, lead, updates);
+        }
       }
     } catch (sheetError) {
       console.error('Failed to update Google Sheet row:', sheetError);
     }
-    
+
     return NextResponse.json({ lead: updatedLead });
   } catch (error) {
     console.error('Lead update error:', error);

@@ -257,9 +257,9 @@ tbody tr:hover { background: var(--bg-card-hover); }
   text-transform: capitalize;
   white-space: nowrap;
 }
-.status-badge.created { background: rgba(255,213,79,0.15); color: var(--status-created); border: 1px solid rgba(255,213,79,0.3); }
-.status-badge.closed_successful { background: rgba(16, 185, 129,0.15); color: var(--status-success); border: 1px solid rgba(16, 185, 129,0.3); }
-.status-badge.closed_unsuccessful { background: rgba(255,82,82,0.15); color: var(--status-fail); border: 1px solid rgba(255,82,82,0.3); }
+.status-badge.pending, .status-badge.created { background: rgba(255,213,79,0.15); color: var(--status-created); border: 1px solid rgba(255,213,79,0.3); }
+.status-badge.live, .status-badge.closed_successful { background: rgba(16, 185, 129,0.15); color: var(--status-success); border: 1px solid rgba(16, 185, 129,0.3); }
+.status-badge.lost, .status-badge.closed_unsuccessful { background: rgba(255,82,82,0.15); color: var(--status-fail); border: 1px solid rgba(255,82,82,0.3); }
 .status-badge::before {
   content: '';
   width: 6px; height: 6px;
@@ -267,18 +267,69 @@ tbody tr:hover { background: var(--bg-card-hover); }
   background: currentColor;
 }
 
+/* Global Dropdowns & Options styling */
+select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #cbd5e1 !important;
+  font-weight: 600 !important;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  font-weight: 600 !important;
+  padding: 10px 14px;
+}
+
+select:focus, select:hover {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
+}
+
 /* Status Dropdown */
 .status-select {
-  padding: 4px 8px;
-  background: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: inherit; font-size: 12px;
-  cursor: pointer; outline: none;
-  transition: all 0.2s;
+  padding: 6px 12px !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  border: 1.5px solid #cbd5e1 !important;
+  background-color: #ffffff !important;
 }
-.status-select:focus { border-color: var(--primary); }
+
+.status-select.status-pending {
+  background-color: #fffbeb !important;
+  color: #b45309 !important;
+  border-color: #fde68a !important;
+}
+
+.status-select.status-live {
+  background-color: #ecfdf5 !important;
+  color: #047857 !important;
+  border-color: #a7f3d0 !important;
+}
+
+.status-select.status-lost {
+  background-color: #fef2f2 !important;
+  color: #b91c1c !important;
+  border-color: #fecaca !important;
+}
+
+.status-select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  font-weight: 600 !important;
+}
 
 /* Modal */
 .modal-overlay {
