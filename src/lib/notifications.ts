@@ -93,24 +93,51 @@ export async function checkAndNotify() {
     }
 
     const intervalMinutes = settings?.notificationInterval || 5;
-    const intervalMs = intervalMinutes * 60 * 1000;
-    const cutoff = new Date(Date.now() - intervalMs);
+    
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
 
-    // 2. Find all unclosed leads from DB
+    // 2. Query pending follow-ups (followUpDate1 or followUpDate2 due today or past due, not closed)
+    const pendingFollowUps = await prisma.lead.findMany({
+      where: {
+        status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
+        OR: [
+          { followUpDate1: { lte: endOfToday } },
+          { followUpDate2: { lte: endOfToday } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // 3. Find all unclosed leads from DB
     const unclosedLeads = await prisma.lead.findMany({
       where: { status: { in: ['pending', 'created'] } },
     });
 
-    if (unclosedLeads.length === 0) {
+    if (unclosedLeads.length === 0 && pendingFollowUps.length === 0 && newLeadsSynced === 0) {
       return { notified: 0, newLeadsSynced, interval: intervalMinutes };
     }
 
-    // 3. Construct clean notification alert message and await push completion
+    // 4. Construct clean notification alert message and await push completion
     if (newLeadsSynced > 0) {
       await sendSystemNotification(
         '🚗 SGA Skoda CRM — 🆕 New Lead Received!',
         `Synced ${newLeadsSynced} new lead(s) automatically!`
       );
+    } else if (pendingFollowUps.length > 0) {
+      if (pendingFollowUps.length === 1) {
+        const lead = pendingFollowUps[0];
+        const cleanPhone = parsePhoneNumber(lead.phone);
+        await sendSystemNotification(
+          '📅 SGA Skoda CRM — Follow-up Due!',
+          `Follow-up due for ${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`
+        );
+      } else {
+        await sendSystemNotification(
+          `📅 SGA Skoda CRM — ${pendingFollowUps.length} Follow-ups Due!`,
+          `You have ${pendingFollowUps.length} pending follow-up(s) due today needing action!`
+        );
+      }
     } else if (unclosedLeads.length === 1) {
       const lead = unclosedLeads[0];
       const cleanPhone = parsePhoneNumber(lead.phone);
@@ -126,7 +153,8 @@ export async function checkAndNotify() {
     }
 
     return {
-      notified: unclosedLeads.length,
+      notified: unclosedLeads.length + pendingFollowUps.length,
+      pendingFollowUpsCount: pendingFollowUps.length,
       newLeadsSynced,
       total: unclosedLeads.length,
       leads: unclosedLeads,
@@ -196,21 +224,46 @@ export async function processGradualNotifications() {
       console.error('Background sync error during gradual notification:', syncErr);
     }
 
-    // 2. Fetch unclosed leads
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    // 2. Query pending follow-ups
+    const pendingFollowUps = await prisma.lead.findMany({
+      where: {
+        status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
+        OR: [
+          { followUpDate1: { lte: endOfToday } },
+          { followUpDate2: { lte: endOfToday } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // 3. Fetch unclosed leads
     const unclosedLeads = await prisma.lead.findMany({
       where: { status: { in: ['pending', 'created'] } },
     });
 
-    if (unclosedLeads.length === 0 && newLeadsSynced === 0) {
+    if (unclosedLeads.length === 0 && pendingFollowUps.length === 0 && newLeadsSynced === 0) {
       return;
     }
 
-    // 3. Construct notification content
+    // 4. Construct notification content
     let title = '🚗 SGA Skoda CRM';
     let body = `${unclosedLeads.length} open lead(s) needing attention!`;
     if (newLeadsSynced > 0) {
       title = '🚗 SGA Skoda CRM — 🆕 New Lead Received!';
       body = `Synced ${newLeadsSynced} new lead(s) automatically!`;
+    } else if (pendingFollowUps.length > 0) {
+      if (pendingFollowUps.length === 1) {
+        const lead = pendingFollowUps[0];
+        const cleanPhone = parsePhoneNumber(lead.phone);
+        title = '📅 SGA Skoda CRM — Follow-up Due!';
+        body = `Follow-up due for ${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`;
+      } else {
+        title = `📅 SGA Skoda CRM — ${pendingFollowUps.length} Follow-ups Due!`;
+        body = `You have ${pendingFollowUps.length} pending follow-up(s) due today needing action!`;
+      }
     } else if (unclosedLeads.length === 1) {
       const lead = unclosedLeads[0];
       const cleanPhone = parsePhoneNumber(lead.phone);

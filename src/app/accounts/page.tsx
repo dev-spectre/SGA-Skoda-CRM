@@ -478,7 +478,7 @@ export default function AccountsPage() {
                     onChange={(e) => setRole(e.target.value)}
                     style={{ width: "100%", padding: "10px 14px" }}
                   >
-                    <option value="USER">Staff User (Soft-delete only)</option>
+                    <option value="USER">Staff User</option>
                     <option value="ADMIN">Administrator (Full Access)</option>
                   </select>
                 </div>
@@ -556,10 +556,16 @@ export default function AccountsPage() {
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
                     style={{ width: "100%", padding: "10px 14px" }}
+                    disabled={editModalUser.username === "admin" || (!!currentUserId && editModalUser.id === currentUserId && editModalUser.role === "ADMIN")}
                   >
-                    <option value="USER">Staff User (Soft-delete only)</option>
+                    <option value="USER">Staff User</option>
                     <option value="ADMIN">Administrator (Full Access)</option>
                   </select>
+                  {(editModalUser.username === "admin" || (!!currentUserId && editModalUser.id === currentUserId && editModalUser.role === "ADMIN")) && (
+                    <span style={{ fontSize: 11, color: "#dc2626", marginTop: 4, display: "block", fontWeight: 500 }}>
+                      🔒 Administrator role cannot be demoted for your own account or the primary super admin.
+                    </span>
+                  )}
                 </div>
 
                 <div>

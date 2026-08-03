@@ -31,6 +31,15 @@ export async function PATCH(
     }
 
     const currentUserObj = existingUsers[0];
+    
+    // Prevent Admin self-demotion or demotion of primary super admin account
+    if ((currentUser.userId === userId || currentUserObj.username === 'admin') && role && role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Administrator role cannot be demoted to a lower role' },
+        { status: 400 }
+      );
+    }
+
     const newUsername = username !== undefined ? username.trim() : currentUserObj.username;
     const newPassword = password !== undefined && password.trim() !== '' 
       ? hashPassword(password.trim()) 
