@@ -47,14 +47,29 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { phone: { contains: search } },
-        { email: { contains: search } },
-        { city: { contains: search } },
-        { adname: { contains: search } },
-        { branch: { contains: search } },
+    if (search.trim()) {
+      const tokens = search.trim().split(/\s+/).filter(Boolean);
+      const searchConditions = tokens.map(token => {
+        const tokenDigits = token.replace(/\D/g, '');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const fields: any[] = [
+          { name: { contains: token, mode: 'insensitive' } },
+          { phone: { contains: token, mode: 'insensitive' } },
+          { email: { contains: token, mode: 'insensitive' } },
+          { city: { contains: token, mode: 'insensitive' } },
+          { adname: { contains: token, mode: 'insensitive' } },
+          { branch: { contains: token, mode: 'insensitive' } },
+          { remark: { contains: token, mode: 'insensitive' } },
+        ];
+        if (tokenDigits && tokenDigits.length >= 3) {
+          fields.push({ phone: { contains: tokenDigits, mode: 'insensitive' } });
+        }
+        return { OR: fields };
+      });
+
+      where.AND = [
+        ...(where.AND || []),
+        ...searchConditions
       ];
     }
     
@@ -71,7 +86,7 @@ export async function GET(request: NextRequest) {
     }
     
     if (city) {
-      where.city = { contains: city };
+      where.city = { contains: city, mode: 'insensitive' };
     }
     
     if (branch) {
