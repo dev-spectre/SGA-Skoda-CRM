@@ -35,15 +35,15 @@ export async function GET(request: NextRequest) {
     ];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = {};
+    const statsWhere: any = {};
     
     if (startDate || endDate) {
-      where.createdAt = {};
+      statsWhere.createdAt = {};
       if (startDate) {
-        where.createdAt.gte = new Date(`${startDate}T00:00:00+05:30`);
+        statsWhere.createdAt.gte = new Date(`${startDate}T00:00:00+05:30`);
       }
       if (endDate) {
-        where.createdAt.lte = new Date(`${endDate}T23:59:59.999+05:30`);
+        statsWhere.createdAt.lte = new Date(`${endDate}T23:59:59.999+05:30`);
       }
     }
     
@@ -67,12 +67,28 @@ export async function GET(request: NextRequest) {
         return { OR: fields };
       });
 
-      where.AND = [
-        ...(where.AND || []),
+      statsWhere.AND = [
+        ...(statsWhere.AND || []),
         ...searchConditions
       ];
     }
     
+    if (city) {
+      statsWhere.city = { contains: city, mode: 'insensitive' };
+    }
+    
+    if (branch) {
+      const words = branch.split(' ').filter(Boolean);
+      if (words.length > 0) {
+        statsWhere.AND = [
+          ...(statsWhere.AND || []),
+          ...words.map(w => ({ branch: { contains: w, mode: 'insensitive' } }))
+        ];
+      }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = { ...statsWhere };
     if (status) {
       if (status === 'pending' || status === 'created') {
         where.status = { in: ['pending', 'created'] };
@@ -85,20 +101,6 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    if (city) {
-      where.city = { contains: city, mode: 'insensitive' };
-    }
-    
-    if (branch) {
-      const words = branch.split(' ').filter(Boolean);
-      if (words.length > 0) {
-        where.AND = [
-          ...(where.AND || []),
-          ...words.map(w => ({ branch: { contains: w, mode: 'insensitive' } }))
-        ];
-      }
-    }
-    
     const [leads, total, statusCounts] = await Promise.all([
       prisma.lead.findMany({
         where,
@@ -108,6 +110,7 @@ export async function GET(request: NextRequest) {
       }),
       prisma.lead.count({ where }),
       prisma.lead.groupBy({
+        where: status ? where : statsWhere,
         by: ['status'],
         _count: {
           status: true,

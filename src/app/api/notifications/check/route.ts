@@ -1,8 +1,15 @@
-import { NextResponse } from 'next/server';
-import { checkAndNotify } from '@/lib/notifications';
+import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
+import { checkAndNotify, processGradualNotifications } from '@/lib/notifications';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const isAsync = request.nextUrl.searchParams.get('async') === 'true';
+    if (isAsync) {
+      waitUntil(processGradualNotifications().catch(console.error));
+      return NextResponse.json({ status: 'ok', message: 'Gradual notification dispatch triggered' }, { status: 200 });
+    }
+
     const result = await checkAndNotify();
     return NextResponse.json(result);
   } catch (error) {
@@ -14,6 +21,6 @@ export async function GET() {
   }
 }
 
-export async function POST() {
-  return GET();
+export async function POST(request: NextRequest) {
+  return GET(request);
 }

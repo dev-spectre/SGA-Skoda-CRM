@@ -276,11 +276,11 @@ export async function performSheetSync() {
   }
 
   // 3. Execute Bulk DB Operations
-  // Create New Leads
+  // Create New Leads with DB-level duplicate skipping
   const chunkSize = 2000;
   for (let i = 0; i < toCreate.length; i += chunkSize) {
     const chunk = toCreate.slice(i, i + chunkSize);
-    await prisma.lead.createMany({ data: chunk });
+    await prisma.lead.createMany({ data: chunk, skipDuplicates: true });
   }
 
   // Update Existing Leads in chunks of 50 concurrent updates

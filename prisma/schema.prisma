@@ -21,7 +21,7 @@ model Lead {
   status    String   @default("created")
   sheetRow  Int?
   sheetId   String?
-  fingerprint String?
+  fingerprint String?   @unique
 
   notifiedAt DateTime?
   createdAt  DateTime  @default(now())

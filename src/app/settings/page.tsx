@@ -408,6 +408,11 @@ function SettingsContent() {
                     const sub = await registerWebPushSubscription(interval);
                     if (sub) {
                       setWebPushEnabled(true);
+                      await fetch("/api/settings", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ backgroundNotificationsEnabled: true, notificationInterval: interval }),
+                      });
                       showToast("Web Push notifications enabled for this device!");
                     } else {
                       showToast("Failed to register Web Push", "error");

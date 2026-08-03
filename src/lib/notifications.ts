@@ -98,7 +98,7 @@ export async function checkAndNotify() {
 
     // 2. Find all unclosed leads from DB
     const unclosedLeads = await prisma.lead.findMany({
-      where: { status: 'created' },
+      where: { status: { in: ['pending', 'created'] } },
     });
 
     if (unclosedLeads.length === 0) {
@@ -169,6 +169,107 @@ export async function restartNotificationLoop() {
   }
   const interval = settings?.notificationInterval || 5;
   startNotificationLoop(interval);
+}
+
+let isGradualDispatching = false;
+
+export async function processGradualNotifications() {
+  if (isGradualDispatching) {
+    console.log('⏳ Notification dispatch already in progress, skipping duplicate cron trigger.');
+    return;
+  }
+
+  isGradualDispatching = true;
+  try {
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    if (settings && settings.backgroundNotificationsEnabled === false) {
+      console.log('🔕 Background notifications disabled in settings.');
+      return;
+    }
+
+    // 1. Sync sheet data in background
+    let newLeadsSynced = 0;
+    try {
+      const syncResult = await performSheetSync();
+      newLeadsSynced = syncResult?.synced || 0;
+    } catch (syncErr) {
+      console.error('Background sync error during gradual notification:', syncErr);
+    }
+
+    // 2. Fetch unclosed leads
+    const unclosedLeads = await prisma.lead.findMany({
+      where: { status: { in: ['pending', 'created'] } },
+    });
+
+    if (unclosedLeads.length === 0 && newLeadsSynced === 0) {
+      return;
+    }
+
+    // 3. Construct notification content
+    let title = '🚗 SGA Skoda CRM';
+    let body = `${unclosedLeads.length} open lead(s) needing attention!`;
+    if (newLeadsSynced > 0) {
+      title = '🚗 SGA Skoda CRM — 🆕 New Lead Received!';
+      body = `Synced ${newLeadsSynced} new lead(s) automatically!`;
+    } else if (unclosedLeads.length === 1) {
+      const lead = unclosedLeads[0];
+      const cleanPhone = parsePhoneNumber(lead.phone);
+      title = '🚗 SGA Skoda CRM — Open Lead';
+      body = `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`;
+    }
+
+    // 4. Send Web Push GRADUALLY across subscriptions with delay
+    const publicVapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    const privateVapidKey = process.env.VAPID_PRIVATE_KEY;
+    if (!publicVapidKey || !privateVapidKey) {
+      return;
+    }
+
+    const subscriptions = await prisma.pushSubscription.findMany();
+    if (subscriptions.length === 0) {
+      return;
+    }
+
+    const now = new Date();
+    for (const sub of subscriptions) {
+      const intervalMinutes = sub.interval || 5;
+      const cutoff = new Date(now.getTime() - intervalMinutes * 60 * 1000);
+
+      if (sub.lastNotifiedAt && sub.lastNotifiedAt > cutoff) {
+        continue;
+      }
+
+      const lastPayload = lastSentPayloads.get(sub.endpoint);
+      if (lastPayload && lastPayload.body === body && lastPayload.time > cutoff.getTime()) {
+        continue;
+      }
+
+      try {
+        const pushSubscription = {
+          endpoint: sub.endpoint,
+          keys: JSON.parse(sub.keys),
+        };
+        await webpush.sendNotification(pushSubscription, JSON.stringify({ title, body }));
+        lastSentPayloads.set(sub.endpoint, { body, time: now.getTime() });
+        await prisma.pushSubscription.update({
+          where: { id: sub.id },
+          data: { lastNotifiedAt: now },
+        });
+      } catch (err: any) {
+        console.error(`Gradual Web Push error for ${sub.endpoint}:`, err?.message || err);
+        if (err?.statusCode === 404 || err?.statusCode === 410) {
+          await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => {});
+        }
+      }
+
+      // Gradual delay between each push notification (300ms)
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  } catch (err) {
+    console.error('Error during gradual notification dispatch:', err);
+  } finally {
+    isGradualDispatching = false;
+  }
 }
 
 // Auto-start background server loop ONLY on traditional long-running Node servers (not Vercel serverless)

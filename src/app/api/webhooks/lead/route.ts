@@ -23,22 +23,48 @@ export async function POST(request: NextRequest) {
     
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     const sheetId = settings?.selectedSpreadsheetId || 'webhook';
-    
-    const lead = await prisma.lead.create({
-      data: {
-        name: parsedName,
-        phone: parsedPhone,
-        email: parsedEmail,
-        city: parsedCity,
-        adname: adname ? String(adname).trim() : '',
-        branch: branch ? String(branch).trim() : '',
-        followUpDate1: followUpDate1 ? new Date(followUpDate1) : null,
-        followUpDate2: followUpDate2 ? new Date(followUpDate2) : null,
-        remark: remark ? String(remark).trim() : null,
-        status: 'pending',
-        sheetId,
-      },
+
+    const nowIso = new Date().toISOString().slice(0, 10);
+    const fingerprint = `${parsedPhone}|${nowIso}|0`;
+
+    const existingLead = await prisma.lead.findFirst({
+      where: {
+        OR: [
+          ...(fingerprint ? [{ fingerprint }] : []),
+          ...(parsedPhone ? [{ phone: parsedPhone }] : [])
+        ]
+      }
     });
+
+    if (existingLead) {
+      return NextResponse.json({ success: true, lead: existingLead, duplicate: true });
+    }
+    
+    let lead;
+    try {
+      lead = await prisma.lead.create({
+        data: {
+          name: parsedName,
+          phone: parsedPhone,
+          email: parsedEmail,
+          city: parsedCity,
+          adname: adname ? String(adname).trim() : '',
+          branch: branch ? String(branch).trim() : '',
+          followUpDate1: followUpDate1 ? new Date(followUpDate1) : null,
+          followUpDate2: followUpDate2 ? new Date(followUpDate2) : null,
+          remark: remark ? String(remark).trim() : null,
+          status: 'pending',
+          sheetId,
+          fingerprint,
+        },
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2002') {
+        const found = await prisma.lead.findFirst({ where: { fingerprint } });
+        return NextResponse.json({ success: true, lead: found, duplicate: true });
+      }
+      throw err;
+    }
 
     // Trigger notification check immediately
     checkAndNotify().catch(console.error);

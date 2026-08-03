@@ -100,17 +100,62 @@ export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats>({ total: 0, pending: 0, live: 0, lost: 0 });
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  const [mounted, setMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+
   const [dateModalOpen, setDateModalOpen] = useState(false);
   const [tempStartDate, setTempStartDate] = useState("");
   const [tempEndDate, setTempEndDate] = useState("");
+
   const [primaryOrder, setPrimaryOrder] = useState<"desc" | "asc">("desc");
   const [secondaryField, setSecondaryField] = useState("name");
   const [secondaryOrder, setSecondaryOrder] = useState<"asc" | "desc">("asc");
+
+  // Restore saved filters from localStorage after initial hydration
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("crm_dashboard_filters");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.search === "string") setSearch(parsed.search);
+        if (typeof parsed.statusFilter === "string") setStatusFilter(parsed.statusFilter);
+        if (typeof parsed.branchFilter === "string") setBranchFilter(parsed.branchFilter);
+        if (typeof parsed.startDate === "string") setStartDate(parsed.startDate);
+        if (typeof parsed.endDate === "string") setEndDate(parsed.endDate);
+        if (parsed.primaryOrder === "asc" || parsed.primaryOrder === "desc") setPrimaryOrder(parsed.primaryOrder);
+        if (typeof parsed.secondaryField === "string") setSecondaryField(parsed.secondaryField);
+        if (parsed.secondaryOrder === "asc" || parsed.secondaryOrder === "desc") setSecondaryOrder(parsed.secondaryOrder);
+      }
+    } catch (e) {
+      console.error("Error restoring filters from localStorage:", e);
+    } finally {
+      setMounted(true);
+    }
+  }, []);
+
+  // Persist filter changes to localStorage
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      const filterData = {
+        search,
+        statusFilter,
+        branchFilter,
+        startDate,
+        endDate,
+        primaryOrder,
+        secondaryField,
+        secondaryOrder,
+      };
+      localStorage.setItem("crm_dashboard_filters", JSON.stringify(filterData));
+    } catch (e) {
+      console.error("Failed to save dashboard filters to localStorage:", e);
+    }
+  }, [search, statusFilter, branchFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -729,24 +774,113 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats */}
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-label">Total Leads</div>
-          <div className="stat-value">{stats.total}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Pending Leads</div>
-          <div className="stat-value open">{stats.pending ?? stats.open ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Live Leads</div>
-          <div className="stat-value success">{stats.live ?? stats.closedSuccessful ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Lost Leads</div>
-          <div className="stat-value fail">{stats.lost ?? stats.closedUnsuccessful ?? 0}</div>
-        </div>
-      </div>
+      {(() => {
+        const isFiltered = mounted && Boolean(search || statusFilter || branchFilter || startDate || endDate);
+        return (
+          <div className="stats-grid">
+            <div className="stat-card">
+              <div className="stat-label">Total Leads</div>
+              <div className="stat-value" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{stats.total}</span>
+                {isFiltered && (
+                  <span
+                    title="Filtered count active"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      background: "rgba(34, 197, 94, 0.12)",
+                      color: "#16a34a",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Pending Leads</div>
+              <div className="stat-value open" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{stats.pending ?? stats.open ?? 0}</span>
+                {isFiltered && (
+                  <span
+                    title="Filtered count active"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      background: "rgba(234, 179, 8, 0.15)",
+                      color: "#ca8a04",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Live Leads</div>
+              <div className="stat-value success" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{stats.live ?? stats.closedSuccessful ?? 0}</span>
+                {isFiltered && (
+                  <span
+                    title="Filtered count active"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      background: "rgba(34, 197, 94, 0.15)",
+                      color: "#16a34a",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Lost Leads</div>
+              <div className="stat-value fail" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{stats.lost ?? stats.closedUnsuccessful ?? 0}</span>
+                {isFiltered && (
+                  <span
+                    title="Filtered count active"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      background: "rgba(239, 68, 68, 0.15)",
+                      color: "#dc2626",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Filters */}
       <div className="filter-bar">
