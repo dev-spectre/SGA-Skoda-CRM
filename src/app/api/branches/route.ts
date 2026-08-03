@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { parseBranches } from '@/lib/utils';
 
 export async function GET() {
   try {
@@ -12,12 +13,7 @@ export async function GET() {
     const uniqueBranches = new Set<string>();
     rawBranches.forEach(b => {
       if (b.branch) {
-        b.branch.split(',').forEach(part => {
-          const clean = part.trim().toLowerCase();
-          if (clean) {
-             uniqueBranches.add(clean);
-          }
-        });
+        parseBranches(b.branch).forEach(clean => uniqueBranches.add(clean));
       }
     });
 

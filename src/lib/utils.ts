@@ -56,7 +56,7 @@ export function sanitizeField(rawVal: string | null | undefined): string {
 export function parseBranches(branchStr: string | null | undefined): string[] {
   if (!branchStr) return [];
   const parsed = String(branchStr).split(',').map(b => {
-    const clean = b.trim().replace(/[_-]/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+    const clean = b.replace(/[_-]/g, ' ').trim().replace(/\s+/g, ' ').toLowerCase();
     if (!clean) return '';
     return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }).filter(Boolean);

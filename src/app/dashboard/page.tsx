@@ -115,6 +115,20 @@ export default function DashboardPage() {
     setPagination(p => ({ ...p, page: 1 }));
   };
 
+  const [apiBranches, setApiBranches] = useState<string[]>([]);
+
+  const fetchBranchesList = useCallback(async () => {
+    try {
+      const res = await fetch("/api/branches");
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.branches)) {
+        setApiBranches(data.branches);
+      }
+    } catch {
+      // fallback
+    }
+  }, []);
+
   const fetchLeads = useCallback(async (force = false) => {
     if (updatingCountRef.current > 0 && !force) {
       return; // Stop polling while data updates are in progress
@@ -131,6 +145,7 @@ export default function DashboardPage() {
       params.set("secondaryOrder", secondaryOrder);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
+      if (branchFilter) params.set("branch", branchFilter);
 
       const cacheKey = params.toString();
       const cachedData = prefetchCache.current[cacheKey];
@@ -197,12 +212,14 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, search, statusFilter, primaryOrder, secondaryField, secondaryOrder]);
+  }, [pagination.page, search, statusFilter, branchFilter, primaryOrder, secondaryField, secondaryOrder]);
 
   useEffect(() => {
+    fetchBranchesList();
     setTimeout(() => fetchLeads(), 0);
 
     const handleLeadsUpdated = () => {
+      fetchBranchesList();
       fetchLeads();
     };
 
@@ -223,7 +240,7 @@ export default function DashboardPage() {
       }
       clearInterval(autoRefreshInterval);
     };
-  }, [fetchLeads]);
+  }, [fetchLeads, fetchBranchesList]);
 
   
   const fetchAllFilteredLeads = async () => {
@@ -236,6 +253,7 @@ export default function DashboardPage() {
       params.set("secondaryOrder", secondaryOrder);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
+      if (branchFilter) params.set("branch", branchFilter);
 
       const res = await fetch(`/api/leads?${params}`);
       const data = await res.json();
@@ -249,14 +267,14 @@ export default function DashboardPage() {
   };
 
   const branches = useMemo(() => {
-    const unique = new Set<string>();
+    const unique = new Set<string>(apiBranches);
     leads.forEach(l => {
       if (l.branch) {
         parseBranches(l.branch).forEach(b => unique.add(b));
       }
     });
     return Array.from(unique).sort();
-  }, [leads]);
+  }, [leads, apiBranches]);
 
   const displayedLeads = useMemo(() => {
     if (!branchFilter) return leads;
@@ -665,7 +683,7 @@ export default function DashboardPage() {
         </select>
         <select
           value={branchFilter}
-          onChange={(e) => setBranchFilter(e.target.value)}
+          onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         >
           <option value="">All Branches</option>
           {branches.map((b: string) => (

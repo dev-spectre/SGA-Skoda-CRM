@@ -63,7 +63,13 @@ export async function GET(request: NextRequest) {
     }
     
     if (branch) {
-      where.branch = { contains: branch, mode: 'insensitive' };
+      const words = branch.split(' ').filter(Boolean);
+      if (words.length > 0) {
+        where.AND = [
+          ...(where.AND || []),
+          ...words.map(w => ({ branch: { contains: w, mode: 'insensitive' } }))
+        ];
+      }
     }
     
     const [leads, total, statusCounts] = await Promise.all([
