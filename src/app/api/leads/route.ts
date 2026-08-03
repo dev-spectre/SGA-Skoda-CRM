@@ -18,6 +18,8 @@ export async function GET(request: NextRequest) {
     const secondaryOrder: 'asc' | 'desc' = rawSecondaryOrder.toLowerCase() === 'desc' ? 'desc' : 'asc';
 
     const city = searchParams.get('city') || '';
+    const startDate = searchParams.get('startDate') || '';
+    const endDate = searchParams.get('endDate') || '';
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
@@ -34,6 +36,16 @@ export async function GET(request: NextRequest) {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {};
+    
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) {
+        where.createdAt.gte = new Date(`${startDate}T00:00:00+05:30`);
+      }
+      if (endDate) {
+        where.createdAt.lte = new Date(`${endDate}T23:59:59.999+05:30`);
+      }
+    }
     
     if (search) {
       where.OR = [

@@ -57,6 +57,45 @@ const toISTDateString = (isoString?: string | null) => {
   return `${y}-${m}-${d_part}`;
 };
 
+const getTodayISTString = () => {
+  const d = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(d);
+  const y = parts.find(p => p.type === 'year')?.value;
+  const m = parts.find(p => p.type === 'month')?.value;
+  const d_part = parts.find(p => p.type === 'day')?.value;
+  return `${y}-${m}-${d_part}`;
+};
+
+const getYesterdayISTString = () => {
+  const d = new Date(Date.now() - 86400000);
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(d);
+  const y = parts.find(p => p.type === 'year')?.value;
+  const m = parts.find(p => p.type === 'month')?.value;
+  const d_part = parts.find(p => p.type === 'day')?.value;
+  return `${y}-${m}-${d_part}`;
+};
+
+const get7DaysAgoISTString = () => {
+  const d = new Date(Date.now() - 6 * 86400000);
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const parts = formatter.formatToParts(d);
+  const y = parts.find(p => p.type === 'year')?.value;
+  const m = parts.find(p => p.type === 'month')?.value;
+  const d_part = parts.find(p => p.type === 'day')?.value;
+  return `${y}-${m}-${d_part}`;
+};
+
+const getFirstDayOfMonthISTString = () => {
+  const d = new Date();
+  const formatter = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit' });
+  const parts = formatter.formatToParts(d);
+  const y = parts.find(p => p.type === 'year')?.value;
+  const m = parts.find(p => p.type === 'month')?.value;
+  return `${y}-${m}-01`;
+};
+
 export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [stats, setStats] = useState<Stats>({ total: 0, pending: 0, live: 0, lost: 0 });
@@ -64,6 +103,11 @@ export default function DashboardPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [dateModalOpen, setDateModalOpen] = useState(false);
+  const [tempStartDate, setTempStartDate] = useState("");
+  const [tempEndDate, setTempEndDate] = useState("");
   const [primaryOrder, setPrimaryOrder] = useState<"desc" | "asc">("desc");
   const [secondaryField, setSecondaryField] = useState("name");
   const [secondaryOrder, setSecondaryOrder] = useState<"asc" | "desc">("asc");
@@ -71,6 +115,42 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+
+  const isTodayActive = startDate === getTodayISTString() && endDate === getTodayISTString();
+
+  const handleToggleToday = () => {
+    if (isTodayActive) {
+      setStartDate("");
+      setEndDate("");
+    } else {
+      const todayStr = getTodayISTString();
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    }
+    setPagination(p => ({ ...p, page: 1 }));
+  };
+
+  const openDateModal = () => {
+    setTempStartDate(startDate);
+    setTempEndDate(endDate);
+    setDateModalOpen(true);
+  };
+
+  const handleApplyDateRange = () => {
+    setStartDate(tempStartDate);
+    setEndDate(tempEndDate);
+    setPagination(p => ({ ...p, page: 1 }));
+    setDateModalOpen(false);
+  };
+
+  const handleClearDateRange = () => {
+    setStartDate("");
+    setEndDate("");
+    setTempStartDate("");
+    setTempEndDate("");
+    setPagination(p => ({ ...p, page: 1 }));
+    setDateModalOpen(false);
+  };
 
   // Remark modal
   const [remarkModal, setRemarkModal] = useState<Lead | null>(null);
@@ -146,6 +226,8 @@ export default function DashboardPage() {
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
       if (branchFilter) params.set("branch", branchFilter);
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
 
       const cacheKey = params.toString();
       const cachedData = prefetchCache.current[cacheKey];
@@ -212,7 +294,7 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, search, statusFilter, branchFilter, primaryOrder, secondaryField, secondaryOrder]);
+  }, [pagination.page, search, statusFilter, branchFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder]);
 
   useEffect(() => {
     fetchBranchesList();
@@ -254,6 +336,8 @@ export default function DashboardPage() {
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
       if (branchFilter) params.set("branch", branchFilter);
+      if (startDate) params.set("startDate", startDate);
+      if (endDate) params.set("endDate", endDate);
 
       const res = await fetch(`/api/leads?${params}`);
       const data = await res.json();
@@ -698,6 +782,53 @@ export default function DashboardPage() {
           <option value="desc">Newest First</option>
           <option value="asc">Oldest First</option>
         </select>
+
+        {/* Today Lead Button */}
+        <button
+          className={`btn ${isTodayActive ? "btn-primary" : "btn-ghost"}`}
+          onClick={handleToggleToday}
+          title="Extract Today's Leads"
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          Today's Leads
+        </button>
+
+        {/* Date Range Calendar Button */}
+        <button
+          className={`btn ${(startDate || endDate) && !isTodayActive ? "btn-primary" : "btn-ghost"}`}
+          onClick={openDateModal}
+          title="Select Date Range"
+          style={{ display: "flex", alignItems: "center", gap: 6 }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+            <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" strokeWidth="2.5" strokeLinecap="round" />
+          </svg>
+          {startDate || endDate
+            ? (startDate === endDate ? startDate : `${startDate || "Start"} → ${endDate || "End"}`)
+            : "Date Range"}
+        </button>
+
+        {/* Clear Date Filter Chip */}
+        {(startDate || endDate) && (
+          <button
+            className="btn btn-ghost"
+            onClick={() => { setStartDate(""); setEndDate(""); setPagination(p => ({ ...p, page: 1 })); }}
+            title="Clear date filter"
+            style={{ padding: "6px 12px", fontSize: 13, background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", borderColor: "rgba(239, 68, 68, 0.2)" }}
+          >
+            ✕ Clear Date
+          </button>
+        )}
       </div>
 
       {/* Table */}
@@ -925,6 +1056,129 @@ export default function DashboardPage() {
               >
                 {deleteLoading ? <><span className="spinner" /> Deleting...</> : "Confirm Delete"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Filter Modal */}
+      {dateModalOpen && (
+        <div className="modal-overlay" onClick={() => setDateModalOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="2" style={{ width: 20, height: 20 }}>
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+                Select Date Range
+              </h2>
+              <button className="btn btn-ghost" onClick={() => setDateModalOpen(false)} style={{ padding: "4px 8px", fontSize: 16 }}>✕</button>
+            </div>
+
+            <p style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 16 }}>
+              Filter leads created within a specific timeframe
+            </p>
+
+            {/* Quick Presets */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const today = getTodayISTString();
+                  setTempStartDate(today);
+                  setTempEndDate(today);
+                }}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  const yest = getYesterdayISTString();
+                  setTempStartDate(yest);
+                  setTempEndDate(yest);
+                }}
+              >
+                Yesterday
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setTempStartDate(get7DaysAgoISTString());
+                  setTempEndDate(getTodayISTString());
+                }}
+              >
+                Last 7 Days
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setTempStartDate(getFirstDayOfMonthISTString());
+                  setTempEndDate(getTodayISTString());
+                }}
+              >
+                This Month
+              </button>
+            </div>
+
+            {/* Custom Inputs */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+                  From Date
+                </label>
+                <input
+                  type="date"
+                  value={tempStartDate}
+                  onChange={(e) => setTempStartDate(e.target.value)}
+                  style={{ width: "100%", padding: "10px 14px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: 14 }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+                  To Date
+                </label>
+                <input
+                  type="date"
+                  value={tempEndDate}
+                  onChange={(e) => setTempEndDate(e.target.value)}
+                  style={{ width: "100%", padding: "10px 14px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: 14 }}
+                />
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="modal-actions" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleClearDateRange}
+              >
+                Clear Range
+              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setDateModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleApplyDateRange}
+                >
+                  Apply Filter
+                </button>
+              </div>
             </div>
           </div>
         </div>
