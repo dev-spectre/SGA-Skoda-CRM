@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   try {
+    const currentUser = await getCurrentUser();
     const searchParams = request.nextUrl.searchParams;
     const search = searchParams.get('search') || '';
     const status = searchParams.get('status') || '';
-    const branch = searchParams.get('branch') || '';
+    
+    // Enforce assigned branch if user is non-admin and assigned to a branch
+    const requestedBranch = searchParams.get('branch') || '';
+    const branch = currentUser?.role !== 'ADMIN' && currentUser?.assignedBranch
+      ? currentUser.assignedBranch
+      : requestedBranch;
+
     const primaryOrder = (searchParams.get('primaryOrder') || searchParams.get('primarySort') || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     let secondaryField = searchParams.get('secondaryField') || searchParams.get('sortBy') || searchParams.get('sortField') || 'name';
@@ -36,6 +44,18 @@ export async function GET(request: NextRequest) {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const statsWhere: any = {};
+
+    // Soft delete filter: Exclude leads hidden by this user
+    if (currentUser?.userId) {
+      const hiddenRecords: { leadId: number }[] = await prisma.$queryRawUnsafe(
+        `SELECT "leadId" FROM "HiddenLead" WHERE "userId" = $1`,
+        currentUser.userId
+      );
+      if (hiddenRecords.length > 0) {
+        const hiddenIds = hiddenRecords.map(r => r.leadId);
+        statsWhere.id = { notIn: hiddenIds };
+      }
+    }
     
     if (startDate || endDate) {
       statsWhere.createdAt = {};
@@ -137,6 +157,8 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({
       leads,
+      userRole: currentUser?.role || 'USER',
+      assignedBranch: currentUser?.assignedBranch || null,
       pagination: {
         page,
         limit,

@@ -27,9 +27,36 @@ model Lead {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  hiddenBy   HiddenLead[]
+
   @@index([createdAt])
   @@index([status])
   @@index([fingerprint])
+}
+
+model User {
+  id             Int          @id @default(autoincrement())
+  username       String       @unique
+  password       String
+  role           String       @default("USER") // "ADMIN" or "USER"
+  assignedBranch String?      // Optional branch assignment, e.g., "coimbatore" or null for all branches
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  hiddenLeads    HiddenLead[]
+}
+
+model HiddenLead {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leadId    Int
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, leadId])
+  @@index([userId])
+  @@index([leadId])
 }
 
 model Settings {

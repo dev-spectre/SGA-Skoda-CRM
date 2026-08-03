@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { findAndWriteToSheetRow, findAndDeleteSheetRow } from '@/lib/google';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function PATCH(
   request: NextRequest,
@@ -100,11 +101,32 @@ export async function DELETE(
     const searchParams = request.nextUrl.searchParams;
     const deleteFromSheet = searchParams.get('deleteFromSheet') === 'true';
 
+    const currentUser = await getCurrentUser();
+    const isUser = currentUser && currentUser.role !== 'ADMIN';
+
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) {
       return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
     }
 
+    if (isUser) {
+      // Non-admin user soft-deletes (hides) the lead from their personal view
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "HiddenLead" ("userId", "leadId") VALUES ($1, $2) ON CONFLICT ("userId", "leadId") DO NOTHING`,
+        currentUser.userId,
+        leadId
+      );
+
+      return NextResponse.json({
+        success: true,
+        hiddenId: leadId,
+        isHidden: true,
+        isPermanent: false,
+        message: 'Lead hidden from your view',
+      });
+    }
+
+    // Admin user permanently deletes the lead
     if (deleteFromSheet) {
       try {
         const settings = await prisma.settings.findUnique({ where: { id: 1 } });
@@ -121,7 +143,12 @@ export async function DELETE(
 
     await prisma.lead.delete({ where: { id: leadId } });
 
-    return NextResponse.json({ success: true, deletedId: leadId, deletedFromSheet: deleteFromSheet });
+    return NextResponse.json({
+      success: true,
+      deletedId: leadId,
+      deletedFromSheet: deleteFromSheet,
+      isPermanent: true,
+    });
   } catch (error) {
     console.error('Lead delete error:', error);
     return NextResponse.json({ error: 'Failed to delete lead' }, { status: 500 });

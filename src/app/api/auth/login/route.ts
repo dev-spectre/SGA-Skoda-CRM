@@ -13,18 +13,18 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    const isValid = await verifyCredentials(username, password);
+    const user = await verifyCredentials(username, password);
     
-    if (!isValid) {
+    if (!user) {
       return NextResponse.json(
-        { error: 'Invalid credentials' },
+        { error: 'Invalid username or password' },
         { status: 401 }
       );
     }
     
-    await createSession();
+    await createSession(user);
     
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, user });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json(

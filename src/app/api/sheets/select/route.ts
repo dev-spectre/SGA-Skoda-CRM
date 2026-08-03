@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeIntelligentMapping } from '@/lib/mapping';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized. Only Administrators can select spreadsheet.' },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const { spreadsheetId, spreadsheetName, sheetName } = body;
     

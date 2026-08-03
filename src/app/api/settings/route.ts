@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { restartNotificationLoop } from '@/lib/notifications';
 import { getGoogleAccountEmail } from '@/lib/google';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function GET() {
   try {
@@ -42,6 +43,14 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized. Only Administrators can change system settings.' },
+        { status: 403 }
+      );
+    }
+
     const body = await request.json();
     const { notificationInterval, columnMapping, backgroundNotificationsEnabled } = body;
     

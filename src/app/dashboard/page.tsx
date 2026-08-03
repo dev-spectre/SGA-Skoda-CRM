@@ -115,10 +115,15 @@ export default function DashboardPage() {
   const [secondaryField, setSecondaryField] = useState("name");
   const [secondaryOrder, setSecondaryOrder] = useState<"asc" | "desc">("asc");
 
-  // Restore saved filters from localStorage after initial hydration
-  useEffect(() => {
+  const [username, setUsername] = useState<string>("");
+  const [userRole, setUserRole] = useState<string>("USER");
+  const [userAssignedBranch, setUserAssignedBranch] = useState<string | null>(null);
+
+  // Restore saved filters from localStorage per authenticated user
+  const restoreUserFilters = useCallback((userKey: string) => {
     try {
-      const saved = localStorage.getItem("crm_dashboard_filters");
+      const storageKey = userKey ? `crm_dashboard_filters_${userKey}` : "crm_dashboard_filters";
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (typeof parsed.search === "string") setSearch(parsed.search);
@@ -137,10 +142,30 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Persist filter changes to localStorage
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) {
+          const userObj = data.user;
+          if (userObj.username) setUsername(userObj.username);
+          if (userObj.role) setUserRole(userObj.role);
+          if (userObj.assignedBranch !== undefined) setUserAssignedBranch(userObj.assignedBranch);
+          restoreUserFilters(userObj.username);
+        } else {
+          restoreUserFilters("");
+        }
+      })
+      .catch(() => {
+        restoreUserFilters("");
+      });
+  }, [restoreUserFilters]);
+
+  // Persist filter changes to localStorage per authenticated user
   useEffect(() => {
     if (!mounted) return;
     try {
+      const storageKey = username ? `crm_dashboard_filters_${username}` : "crm_dashboard_filters";
       const filterData = {
         search,
         statusFilter,
@@ -151,11 +176,11 @@ export default function DashboardPage() {
         secondaryField,
         secondaryOrder,
       };
-      localStorage.setItem("crm_dashboard_filters", JSON.stringify(filterData));
+      localStorage.setItem(storageKey, JSON.stringify(filterData));
     } catch (e) {
       console.error("Failed to save dashboard filters to localStorage:", e);
     }
-  }, [search, statusFilter, branchFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted]);
+  }, [search, statusFilter, branchFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -304,6 +329,8 @@ export default function DashboardPage() {
       if (res.ok) {
         setLeads(data.leads);
         setStats(data.stats);
+        if (data.userRole) setUserRole(data.userRole);
+        if (data.assignedBranch !== undefined) setUserAssignedBranch(data.assignedBranch);
         
         // Only update pagination if it actually changes total pages/records
         // This prevents the page jumping from 2 to 1 back to 2 during polling
@@ -899,15 +926,34 @@ export default function DashboardPage() {
           <option value="live">Live Leads</option>
           <option value="lost">Lost Leads</option>
         </select>
-        <select
-          value={branchFilter}
-          onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-        >
-          <option value="">All Branches</option>
-          {branches.map((b: string) => (
-            <option key={b} value={b}>{b}</option>
-          ))}
-        </select>
+        {userRole !== "ADMIN" && userAssignedBranch ? (
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 12px",
+              borderRadius: "8px",
+              background: "rgba(255, 255, 255, 0.06)",
+              border: "1px solid var(--border)",
+              fontSize: "13px",
+              color: "var(--text-secondary)"
+            }}
+            title="Branch restricted by Admin"
+          >
+            🔒 <span>Branch: <strong style={{ textTransform: "capitalize", color: "var(--text-primary)" }}>{userAssignedBranch.replace(/_/g, " ")}</strong></span>
+          </div>
+        ) : (
+          <select
+            value={branchFilter}
+            onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+          >
+            <option value="">All Branches</option>
+            {branches.map((b: string) => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+        )}
         <select
           value={primaryOrder}
           onChange={(e) => { setPrimaryOrder(e.target.value as "desc" | "asc"); setPagination(p => ({ ...p, page: 1 })); }}
@@ -1153,34 +1199,42 @@ export default function DashboardPage() {
       {deleteModal && (
         <div className="modal-overlay" onClick={() => setDeleteModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ color: "#ef4444" }}>Delete Lead</h2>
+            <h2 style={{ color: "#ef4444" }}>
+              {userRole === "ADMIN" ? "Delete Lead Permanently" : "Hide Lead"}
+            </h2>
             <p>
-              Are you sure you want to delete lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})?
+              {userRole === "ADMIN" ? (
+                <>Are you sure you want to permanently delete lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})?</>
+              ) : (
+                <>Are you sure you want to hide lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})? It will be removed from your view while remaining in the database for Administrators.</>
+              )}
             </p>
             
-            <div style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="deleteOption"
-                  checked={!deleteFromSheet}
-                  onChange={() => setDeleteFromSheet(false)}
-                />
-                <span><strong>Delete from DB only</strong> (Keep row in Google Sheet)</span>
-              </label>
+            {userRole === "ADMIN" && (
+              <div style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="deleteOption"
+                    checked={!deleteFromSheet}
+                    onChange={() => setDeleteFromSheet(false)}
+                  />
+                  <span><strong>Delete from DB only</strong> (Keep row in Google Sheet)</span>
+                </label>
 
-              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="deleteOption"
-                  checked={deleteFromSheet}
-                  onChange={() => setDeleteFromSheet(true)}
-                />
-                <span><strong>Delete from DB & Google Sheet</strong> (Clear row from Google Sheet)</span>
-              </label>
-            </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="deleteOption"
+                    checked={deleteFromSheet}
+                    onChange={() => setDeleteFromSheet(true)}
+                  />
+                  <span><strong>Delete from DB & Google Sheet</strong> (Clear row from Google Sheet)</span>
+                </label>
+              </div>
+            )}
 
-            <div className="modal-actions">
+            <div className="modal-actions" style={{ marginTop: 20 }}>
               <button className="btn btn-ghost" onClick={() => setDeleteModal(null)}>Cancel</button>
               <button
                 className="btn btn-primary"
@@ -1188,7 +1242,11 @@ export default function DashboardPage() {
                 onClick={handleDeleteLead}
                 disabled={deleteLoading}
               >
-                {deleteLoading ? <><span className="spinner" /> Deleting...</> : "Confirm Delete"}
+                {deleteLoading ? (
+                  <><span className="spinner" /> {userRole === "ADMIN" ? "Deleting..." : "Hiding..."}</>
+                ) : (
+                  userRole === "ADMIN" ? "Confirm Delete" : "Hide Lead"
+                )}
               </button>
             </div>
           </div>

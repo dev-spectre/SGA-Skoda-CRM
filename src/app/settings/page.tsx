@@ -43,12 +43,22 @@ function SettingsContent() {
     name: 0, phone: 1, email: 2, city: 3, createdAt: 4, remark: 5, status: 6, adname: 7, branch: 8, followUpDate1: 9, followUpDate2: 10
   });
 
+  const [userRole, setUserRole] = useState<string>("USER");
+
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
   useEffect(() => {
+    // Check user role
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user?.role) setUserRole(data.user.role);
+      })
+      .catch(() => {});
+
     // Check Web Push subscription status for current device
     getWebPushSubscription().then((sub) => setWebPushEnabled(!!sub));
 
@@ -226,6 +236,32 @@ function SettingsContent() {
       <h1>Settings</h1>
       <p className="page-desc">Configure your Google Sheets connection, notifications, and column mapping.</p>
 
+      {userRole !== "ADMIN" && (
+        <div
+          style={{
+            background: "rgba(239, 68, 68, 0.08)",
+            border: "1px solid rgba(239, 68, 68, 0.25)",
+            borderRadius: "var(--radius-sm)",
+            padding: "14px 18px",
+            marginBottom: 24,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            color: "#dc2626",
+            fontSize: 14,
+            fontWeight: 500
+          }}
+        >
+          <span style={{ fontSize: 20 }}>🔒</span>
+          <div>
+            <strong>Administrator Settings Restriction</strong>
+            <div style={{ fontSize: 13, opacity: 0.9 }}>
+              Google Sheet links, sheet selection, background sync intervals, and column mappings are managed exclusively by Administrators.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Google Account */}
       <div className="settings-section">
         <h2>Google Account</h2>
@@ -239,9 +275,15 @@ function SettingsContent() {
                 <span className="not-connected-badge">Not Connected</span>
               )}
             </div>
-            <a href="/api/auth/google" className="btn btn-primary">
-              {isGoogleLinked ? "Reconnect Account" : "Link Google Account"}
-            </a>
+            {userRole === "ADMIN" ? (
+              <a href="/api/auth/google" className="btn btn-primary">
+                {isGoogleLinked ? "Reconnect Account" : "Link Google Account"}
+              </a>
+            ) : (
+              <button className="btn btn-ghost" disabled style={{ opacity: 0.6 }}>
+                🔒 Admin Only
+              </button>
+            )}
           </div>
 
           {isGoogleLinked && (
@@ -305,6 +347,7 @@ function SettingsContent() {
                 value={selectedSpreadsheet}
                 onChange={(e) => handleSpreadsheetChange(e.target.value)}
                 style={{ flex: 1, minWidth: 250 }}
+                disabled={userRole !== "ADMIN"}
               >
                 <option value="">Select a spreadsheet...</option>
                 {spreadsheets.map((s: Spreadsheet) => (
@@ -322,6 +365,7 @@ function SettingsContent() {
                     value={selectedSheet}
                     onChange={(e) => setSelectedSheet(e.target.value)}
                     style={{ flex: 1, minWidth: 250 }}
+                    disabled={userRole !== "ADMIN"}
                   >
                     <option value="">Select a sheet...</option>
                     {sheetNames.map((name: string) => (
@@ -335,9 +379,9 @@ function SettingsContent() {
               <button
                 className="btn btn-primary"
                 onClick={handleSaveSheet}
-                disabled={!selectedSpreadsheet || !selectedSheet || saving}
+                disabled={userRole !== "ADMIN" || !selectedSpreadsheet || !selectedSheet || saving}
               >
-                Save Selection
+                {userRole === "ADMIN" ? "Save Selection" : "🔒 Admin Only"}
               </button>
             </div>
           </div>
@@ -361,17 +405,18 @@ function SettingsContent() {
                 type="number"
                 min="0"
                 value={value}
+                disabled={userRole !== "ADMIN"}
                 onChange={(e) => setMapping(m => ({ ...m, [key]: parseInt(e.target.value) || 0 }))}
               />
             </label>
           ))}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16, gap: 12 }}>
-          <button className="btn btn-secondary" onClick={handleAutoMap} disabled={saving || !settings?.selectedSpreadsheetId}>
-            Auto-Map Columns
+          <button className="btn btn-secondary" onClick={handleAutoMap} disabled={userRole !== "ADMIN" || saving || !settings?.selectedSpreadsheetId}>
+            {userRole === "ADMIN" ? "Auto-Map Columns" : "🔒 Admin Only"}
           </button>
-          <button className="btn btn-primary" onClick={handleSaveMapping} disabled={saving}>
-            Save Mapping
+          <button className="btn btn-primary" onClick={handleSaveMapping} disabled={userRole !== "ADMIN" || saving}>
+            {userRole === "ADMIN" ? "Save Mapping" : "🔒 Admin Only"}
           </button>
         </div>
       </div>

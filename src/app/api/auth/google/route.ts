@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server';
 import { getAuthUrl } from '@/lib/google';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function GET() {
   try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized. Only Administrators can link Google Accounts.' },
+        { status: 403 }
+      );
+    }
+
     const url = getAuthUrl();
     return NextResponse.redirect(url);
   } catch (error) {

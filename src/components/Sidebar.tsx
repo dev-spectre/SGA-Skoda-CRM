@@ -2,10 +2,30 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+
+interface UserProfile {
+  username: string;
+  role: string;
+  assignedBranch: string | null;
+}
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [user, setUser] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    if (pathname === "/login") return;
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) {
+          setUser(data.user);
+        }
+      })
+      .catch(() => {});
+  }, [pathname]);
 
   // Don't show sidebar on login page
   if (pathname === "/login") return null;
@@ -14,6 +34,8 @@ export function Sidebar() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
   };
+
+  const isAdmin = user?.role === "ADMIN";
 
   return (
     <aside className="sidebar">
@@ -54,6 +76,21 @@ export function Sidebar() {
           Calendar
         </Link>
 
+        {isAdmin && (
+          <Link
+            href="/accounts"
+            className={`sidebar-link ${pathname === "/accounts" ? "active" : ""}`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            Accounts
+          </Link>
+        )}
+
         <Link
           href="/settings"
           className={`sidebar-link ${pathname === "/settings" ? "active" : ""}`}
@@ -67,6 +104,32 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        {user && (
+          <div style={{ marginBottom: 12, padding: "0 4px" }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{user.username}</div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  background: user.role === "ADMIN" ? "rgba(0, 200, 83, 0.15)" : "rgba(33, 150, 243, 0.15)",
+                  color: user.role === "ADMIN" ? "#00e676" : "#448aff",
+                }}
+              >
+                {user.role}
+              </span>
+              {user.assignedBranch && (
+                <span style={{ fontSize: 11, color: "var(--text-muted)", textTransform: "capitalize" }}>
+                  • {user.assignedBranch.replace(/_/g, " ")}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <button className="logout-btn" onClick={handleLogout}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

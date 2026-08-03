@@ -1,9 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { computeIntelligentMapping } from '@/lib/mapping';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function POST() {
   try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser || currentUser.role !== 'ADMIN') {
+      return NextResponse.json(
+        { error: 'Unauthorized. Only Administrators can auto-map columns.' },
+        { status: 403 }
+      );
+    }
+
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     if (!settings?.selectedSpreadsheetId || !settings?.selectedSheetName) {
       return NextResponse.json({ error: 'No sheet selected' }, { status: 400 });
