@@ -403,7 +403,10 @@ export default function AccountsPage() {
                       )}
                     </td>
 
-                    <td style={{ padding: "16px 18px", fontSize: "13px", color: "var(--text-muted)" }}>
+                    <td 
+                      style={{ padding: "16px 18px", fontSize: "13px", color: "var(--text-muted)", maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
+                      title={new Date(u.createdAt).toLocaleString("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true })}
+                    >
                       {new Date(u.createdAt).toLocaleDateString("en-IN", {
                         day: "2-digit",
                         month: "short",

@@ -238,15 +238,30 @@ thead th {
   border-bottom: 1px solid var(--border);
   background: rgba(16, 185, 129,0.03);
   white-space: nowrap;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 tbody td {
   padding: 14px 16px;
   font-size: 14px;
   border-bottom: 1px solid rgba(16, 185, 129,0.06);
   vertical-align: middle;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 tbody tr { transition: background 0.15s; }
 tbody tr:hover { background: var(--bg-card-hover); }
+
+.table-date-cell {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
 
 /* Status Badge */
 .status-badge {

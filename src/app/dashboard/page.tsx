@@ -768,10 +768,37 @@ export default function DashboardPage() {
   };
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "2-digit", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit",
-    });
+    if (!dateStr) return "—";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleDateString("en-IN", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const getFullDateTooltip = (dateStr: string) => {
+    if (!dateStr) return "No date available";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      return d.toLocaleString("en-IN", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: true,
+      });
+    } catch {
+      return dateStr;
+    }
   };
 
   return (
@@ -1030,62 +1057,63 @@ export default function DashboardPage() {
             <table>
               <thead>
                 <tr>
-                  <th onClick={() => handleHeaderClick("name")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Name">
+                  <th onClick={() => handleHeaderClick("name")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "180px" }} title="Click to sort by Name">
                     Name {secondaryField === "name" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th>Phone</th>
-                  <th onClick={() => handleHeaderClick("city")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by City">
+                  <th style={{ maxWidth: "155px" }}>Phone</th>
+                  <th onClick={() => handleHeaderClick("city")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "155px" }} title="Click to sort by City">
                     City {secondaryField === "city" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("adname")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Ad Name">
+                  <th onClick={() => handleHeaderClick("adname")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "195px" }} title="Click to sort by Ad Name">
                     Ad Name {secondaryField === "adname" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("branch")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Branch">
+                  <th onClick={() => handleHeaderClick("branch")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "185px" }} title="Click to sort by Branch">
                     Branch {secondaryField === "branch" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("followUpDate1")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Follow Up">
+                  <th onClick={() => handleHeaderClick("followUpDate1")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "190px" }} title="Click to sort by Follow Up">
                     Follow Up {secondaryField === "followUpDate1" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("createdAt")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Created At">
+                  <th onClick={() => handleHeaderClick("createdAt")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "180px" }} title="Click to sort by Created At">
                     Created At {primaryOrder === "desc" ? "↓" : "↑"}
                   </th>
-                  <th onClick={() => handleHeaderClick("status")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Status">
+                  <th onClick={() => handleHeaderClick("status")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "165px" }} title="Click to sort by Status">
                     Status {secondaryField === "status" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th>Remark</th>
-                  <th>Actions</th>
+                  <th style={{ maxWidth: "220px" }}>Remark</th>
+                  <th style={{ maxWidth: "145px" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {displayedLeads.length === 0 ? (
                   <tr>
-                    <td colSpan={9} style={{ textAlign: "center", padding: "40px" }}>
+                    <td colSpan={10} style={{ textAlign: "center", padding: "40px" }}>
                       No leads found.
                     </td>
                   </tr>
                 ) : (
                   displayedLeads.map((lead: Lead) => (
                     <tr key={lead.id}>
-                    <td style={{ fontWeight: 600 }}>{lead.name}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 13 }}>{parsePhoneNumber(lead.phone)}</td>
-                    <td>{lead.city || "—"}</td>
-                    <td>{lead.adname || "—"}</td>
-                    <td>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                    <td style={{ fontWeight: 600, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name}>{lead.name}</td>
+                    <td style={{ fontFamily: "monospace", fontSize: 13, maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={parsePhoneNumber(lead.phone)}>{parsePhoneNumber(lead.phone)}</td>
+                    <td style={{ maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.city || "—"}>{lead.city || "—"}</td>
+                    <td style={{ maxWidth: "195px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.adname || "—"}>{lead.adname || "—"}</td>
+                    <td style={{ maxWidth: "185px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.branch ? parseBranches(lead.branch).join(", ") : "—"}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", overflow: "hidden" }}>
                         {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
-                          <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600 }}>
+                          <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
                             {b}
                           </span>
                         )) : "—"}
                       </div>
                     </td>
-                    <td>
+                    <td style={{ maxWidth: "190px" }} title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'None'}, Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'None'}`}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                           <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
                           <input 
                             type="date" 
                             value={toISTDateString(lead.followUpDate1)} 
+                            title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'No date set'}`}
                             onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
                             className="status-select"
                             style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
@@ -1096,6 +1124,7 @@ export default function DashboardPage() {
                           <input 
                             type="date" 
                             value={toISTDateString(lead.followUpDate2)} 
+                            title={`Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'No date set'}`}
                             onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
                             className="status-select"
                             style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
@@ -1103,8 +1132,13 @@ export default function DashboardPage() {
                         </div>
                       </div>
                     </td>
-                    <td style={{ whiteSpace: "nowrap", fontSize: 13 }}>{formatDate(lead.createdAt)}</td>
-                    <td>
+                    <td 
+                      style={{ maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, cursor: "pointer" }} 
+                      title={getFullDateTooltip(lead.createdAt)}
+                    >
+                      {formatDate(lead.createdAt)}
+                    </td>
+                    <td style={{ maxWidth: "165px" }}>
                       <select
                         className={`status-select ${
                           (lead.status === "pending" || lead.status === "created") ? "status-pending" :
@@ -1112,20 +1146,21 @@ export default function DashboardPage() {
                         }`}
                         value={lead.status === 'created' ? 'pending' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
                         onChange={(e) => handleStatusChange(lead, e.target.value)}
+                        title={`Status: ${formatStatusLabel(lead.status)}`}
                       >
                         <option value="pending">Pending Lead</option>
                         <option value="live">Live Lead</option>
                         <option value="lost">Lost Lead</option>
                       </select>
                     </td>
-                    <td className="remark-cell">
+                    <td className="remark-cell" style={{ maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {lead.remark ? (
                         <span className="remark-text" title={lead.remark}>{lead.remark}</span>
                       ) : (
                         <span style={{ color: "var(--text-muted)", fontSize: 13 }}>—</span>
                       )}
                     </td>
-                    <td>
+                    <td style={{ maxWidth: "145px" }}>
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         <button className="add-remark-btn" onClick={() => openRemarkModal(lead)}>
                           {lead.remark ? "Edit" : "Add"} Remark
