@@ -237,6 +237,7 @@ export default function DashboardPage() {
   const activeFetchIdRef = useRef(0);
   const isFetchingRef = useRef(false);
   const prefetchCache = useRef<Record<string, any>>({});
+  const lastKnownStateRef = useRef<string | null>(null);
 
   const startUpdating = () => {
     updatingCountRef.current++;
@@ -279,7 +280,7 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const fetchLeads = useCallback(async (force = false) => {
+  const fetchLeads = useCallback(async (force = false, isBackgroundPoll = false) => {
     if (updatingCountRef.current > 0 && !force) {
       return; // Stop polling while data updates are in progress
     }
@@ -342,21 +343,23 @@ export default function DashboardPage() {
         });
 
         // Prefetch adjacent pages
-        const prefetchParams = new URLSearchParams(cacheKey);
-        const currentPage = pagination.page;
-        
-        const prefetchPage = (p: number) => {
-          prefetchParams.set("page", p.toString());
-          const pKey = prefetchParams.toString();
-          if (!prefetchCache.current[pKey]) {
-            fetch(`/api/leads?${pKey}`).then(r => r.json()).then(d => {
-              if (!d.error) prefetchCache.current[pKey] = d;
-            }).catch(() => {});
-          }
-        };
+        if (!isBackgroundPoll) {
+          const prefetchParams = new URLSearchParams(cacheKey);
+          const currentPage = pagination.page;
+          
+          const prefetchPage = (p: number) => {
+            prefetchParams.set("page", p.toString());
+            const pKey = prefetchParams.toString();
+            if (!prefetchCache.current[pKey]) {
+              fetch(`/api/leads?${pKey}`).then(r => r.json()).then(d => {
+                if (!d.error) prefetchCache.current[pKey] = d;
+              }).catch(() => {});
+            }
+          };
 
-        prefetchPage(currentPage + 1);
-        if (currentPage > 1) prefetchPage(currentPage - 1);
+          prefetchPage(currentPage + 1);
+          if (currentPage > 1) prefetchPage(currentPage - 1);
+        }
       }
     } catch {
       showToast("Failed to fetch leads", "error");
@@ -381,12 +384,25 @@ export default function DashboardPage() {
       window.addEventListener("crm-leads-updated", handleLeadsUpdated);
     }
 
-    // Live auto-refresh dashboard data every 10 seconds (paused while updating)
-    const autoRefreshInterval = setInterval(() => {
-      if (updatingCountRef.current === 0 && !isFetchingRef.current) {
-        fetchLeads();
+    // Smart auto-refresh: polls lightweight check API every 60s, pauses if tab hidden or updating
+    const autoRefreshInterval = setInterval(async () => {
+      if (document.visibilityState !== 'visible' || updatingCountRef.current > 0 || isFetchingRef.current) {
+        return;
       }
-    }, 10000);
+      try {
+        const res = await fetch('/api/leads/check');
+        if (res.ok) {
+          const data = await res.json();
+          const currentState = `${data.count}-${data.lastUpdated}`;
+          if (lastKnownStateRef.current !== currentState) {
+            lastKnownStateRef.current = currentState;
+            fetchLeads(false, true);
+          }
+        }
+      } catch (e) {
+        // silently ignore check errors
+      }
+    }, 60000);
 
     return () => {
       if (typeof window !== "undefined") {

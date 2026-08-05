@@ -97,67 +97,71 @@ export async function checkAndNotify() {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
-    // 2. Query pending follow-ups (followUpDate1 or followUpDate2 due today or past due, not closed)
-    const pendingFollowUps = await prisma.lead.findMany({
-      where: {
-        status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
-        OR: [
-          { followUpDate1: { lte: endOfToday } },
-          { followUpDate2: { lte: endOfToday } },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    // 2. Query counts and single lead details efficiently
+    const followUpWhere = {
+      status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
+      OR: [
+        { followUpDate1: { lte: endOfToday } },
+        { followUpDate2: { lte: endOfToday } },
+      ],
+    };
+    const unclosedWhere = { status: { in: ['pending', 'created'] } };
 
-    // 3. Find all unclosed leads from DB
-    const unclosedLeads = await prisma.lead.findMany({
-      where: { status: { in: ['pending', 'created'] } },
-    });
+    const [pendingFollowUpsCount, firstPendingLead, unclosedCount, firstUnclosedLead] = await Promise.all([
+      prisma.lead.count({ where: followUpWhere }),
+      prisma.lead.findFirst({
+        where: followUpWhere,
+        orderBy: { createdAt: 'desc' },
+        select: { name: true, phone: true, city: true },
+      }),
+      prisma.lead.count({ where: unclosedWhere }),
+      prisma.lead.findFirst({
+        where: unclosedWhere,
+        select: { name: true, phone: true, city: true },
+      }),
+    ]);
 
-    if (unclosedLeads.length === 0 && pendingFollowUps.length === 0 && newLeadsSynced === 0) {
+    if (unclosedCount === 0 && pendingFollowUpsCount === 0 && newLeadsSynced === 0) {
       return { notified: 0, newLeadsSynced, interval: intervalMinutes };
     }
 
-    // 4. Construct clean notification alert message and await push completion
+    // 3. Construct clean notification alert message and await push completion
     if (newLeadsSynced > 0) {
       await sendSystemNotification(
         '🚗 SGA Skoda CRM — 🆕 New Lead Received!',
         `Synced ${newLeadsSynced} new lead(s) automatically!`
       );
-    } else if (pendingFollowUps.length > 0) {
-      if (pendingFollowUps.length === 1) {
-        const lead = pendingFollowUps[0];
-        const cleanPhone = parsePhoneNumber(lead.phone);
+    } else if (pendingFollowUpsCount > 0) {
+      if (pendingFollowUpsCount === 1 && firstPendingLead) {
+        const cleanPhone = parsePhoneNumber(firstPendingLead.phone);
         await sendSystemNotification(
           '📅 SGA Skoda CRM — Follow-up Due!',
-          `Follow-up due for ${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`
+          `Follow-up due for ${firstPendingLead.name} (${cleanPhone}) from ${firstPendingLead.city || 'Unknown'}`
         );
       } else {
         await sendSystemNotification(
-          `📅 SGA Skoda CRM — ${pendingFollowUps.length} Follow-ups Due!`,
-          `You have ${pendingFollowUps.length} pending follow-up(s) due today needing action!`
+          `📅 SGA Skoda CRM — ${pendingFollowUpsCount} Follow-ups Due!`,
+          `You have ${pendingFollowUpsCount} pending follow-up(s) due today needing action!`
         );
       }
-    } else if (unclosedLeads.length === 1) {
-      const lead = unclosedLeads[0];
-      const cleanPhone = parsePhoneNumber(lead.phone);
+    } else if (unclosedCount === 1 && firstUnclosedLead) {
+      const cleanPhone = parsePhoneNumber(firstUnclosedLead.phone);
       await sendSystemNotification(
         '🚗 SGA Skoda CRM — Open Lead',
-        `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`
+        `${firstUnclosedLead.name} (${cleanPhone}) from ${firstUnclosedLead.city || 'Unknown'}`
       );
     } else {
       await sendSystemNotification(
         '🚗 SGA Skoda CRM',
-        `You have ${unclosedLeads.length} open lead(s) needing attention!`
+        `You have ${unclosedCount} open lead(s) needing attention!`
       );
     }
 
     return {
-      notified: unclosedLeads.length + pendingFollowUps.length,
-      pendingFollowUpsCount: pendingFollowUps.length,
+      notified: unclosedCount + pendingFollowUpsCount,
+      pendingFollowUpsCount,
       newLeadsSynced,
-      total: unclosedLeads.length,
-      leads: unclosedLeads,
+      total: unclosedCount,
       interval: intervalMinutes,
     };
   } catch (error: any) {
@@ -227,48 +231,53 @@ export async function processGradualNotifications() {
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
 
-    // 2. Query pending follow-ups
-    const pendingFollowUps = await prisma.lead.findMany({
-      where: {
-        status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
-        OR: [
-          { followUpDate1: { lte: endOfToday } },
-          { followUpDate2: { lte: endOfToday } },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    // 2. Query counts and single lead details efficiently
+    const followUpWhere = {
+      status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
+      OR: [
+        { followUpDate1: { lte: endOfToday } },
+        { followUpDate2: { lte: endOfToday } },
+      ],
+    };
+    const unclosedWhere = { status: { in: ['pending', 'created'] } };
 
-    // 3. Fetch unclosed leads
-    const unclosedLeads = await prisma.lead.findMany({
-      where: { status: { in: ['pending', 'created'] } },
-    });
+    const [pendingFollowUpsCount, firstPendingLead, unclosedCount, firstUnclosedLead] = await Promise.all([
+      prisma.lead.count({ where: followUpWhere }),
+      prisma.lead.findFirst({
+        where: followUpWhere,
+        orderBy: { createdAt: 'desc' },
+        select: { name: true, phone: true, city: true },
+      }),
+      prisma.lead.count({ where: unclosedWhere }),
+      prisma.lead.findFirst({
+        where: unclosedWhere,
+        select: { name: true, phone: true, city: true },
+      }),
+    ]);
 
-    if (unclosedLeads.length === 0 && pendingFollowUps.length === 0 && newLeadsSynced === 0) {
+    if (unclosedCount === 0 && pendingFollowUpsCount === 0 && newLeadsSynced === 0) {
       return;
     }
 
-    // 4. Construct notification content
+    // 3. Construct notification content
     let title = '🚗 SGA Skoda CRM';
-    let body = `${unclosedLeads.length} open lead(s) needing attention!`;
+    let body = `${unclosedCount} open lead(s) needing attention!`;
     if (newLeadsSynced > 0) {
       title = '🚗 SGA Skoda CRM — 🆕 New Lead Received!';
       body = `Synced ${newLeadsSynced} new lead(s) automatically!`;
-    } else if (pendingFollowUps.length > 0) {
-      if (pendingFollowUps.length === 1) {
-        const lead = pendingFollowUps[0];
-        const cleanPhone = parsePhoneNumber(lead.phone);
+    } else if (pendingFollowUpsCount > 0) {
+      if (pendingFollowUpsCount === 1 && firstPendingLead) {
+        const cleanPhone = parsePhoneNumber(firstPendingLead.phone);
         title = '📅 SGA Skoda CRM — Follow-up Due!';
-        body = `Follow-up due for ${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`;
+        body = `Follow-up due for ${firstPendingLead.name} (${cleanPhone}) from ${firstPendingLead.city || 'Unknown'}`;
       } else {
-        title = `📅 SGA Skoda CRM — ${pendingFollowUps.length} Follow-ups Due!`;
-        body = `You have ${pendingFollowUps.length} pending follow-up(s) due today needing action!`;
+        title = `📅 SGA Skoda CRM — ${pendingFollowUpsCount} Follow-ups Due!`;
+        body = `You have ${pendingFollowUpsCount} pending follow-up(s) due today needing action!`;
       }
-    } else if (unclosedLeads.length === 1) {
-      const lead = unclosedLeads[0];
-      const cleanPhone = parsePhoneNumber(lead.phone);
+    } else if (unclosedCount === 1 && firstUnclosedLead) {
+      const cleanPhone = parsePhoneNumber(firstUnclosedLead.phone);
       title = '🚗 SGA Skoda CRM — Open Lead';
-      body = `${lead.name} (${cleanPhone}) from ${lead.city || 'Unknown'}`;
+      body = `${firstUnclosedLead.name} (${cleanPhone}) from ${firstUnclosedLead.city || 'Unknown'}`;
     }
 
     // 4. Send Web Push GRADUALLY across subscriptions with delay

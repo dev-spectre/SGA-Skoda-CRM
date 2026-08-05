@@ -30,7 +30,9 @@ model Lead {
   hiddenBy   HiddenLead[]
 
   @@index([createdAt])
+  @@index([updatedAt])
   @@index([status])
+  @@index([branch])
   @@index([fingerprint])
 }
 

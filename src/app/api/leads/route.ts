@@ -47,13 +47,11 @@ export async function GET(request: NextRequest) {
 
     // Soft delete filter: Exclude leads hidden by this user
     if (currentUser?.userId) {
-      const hiddenRecords: { leadId: number }[] = await prisma.$queryRawUnsafe(
-        `SELECT "leadId" FROM "HiddenLead" WHERE "userId" = $1`,
-        currentUser.userId
-      );
+      const hiddenRecords = await prisma.$queryRaw<{ leadId: number }[]>`
+        SELECT "leadId" FROM "HiddenLead" WHERE "userId" = ${currentUser.userId}
+      `;
       if (hiddenRecords.length > 0) {
-        const hiddenIds = hiddenRecords.map(r => r.leadId);
-        statsWhere.id = { notIn: hiddenIds };
+        statsWhere.id = { notIn: hiddenRecords.map(r => r.leadId) };
       }
     }
     
@@ -127,6 +125,21 @@ export async function GET(request: NextRequest) {
         orderBy,
         skip,
         take: limit,
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          email: true,
+          city: true,
+          adname: true,
+          branch: true,
+          followUpDate1: true,
+          followUpDate2: true,
+          remark: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       }),
       prisma.lead.count({ where }),
       prisma.lead.groupBy({
