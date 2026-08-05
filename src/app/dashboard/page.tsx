@@ -1060,7 +1060,7 @@ export default function DashboardPage() {
                   <th onClick={() => handleHeaderClick("name")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "180px" }} title="Click to sort by Name">
                     Name {secondaryField === "name" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th style={{ maxWidth: "155px" }}>Phone</th>
+                  <th style={{ minWidth: "165px", maxWidth: "190px" }}>Phone</th>
                   <th onClick={() => handleHeaderClick("city")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "155px" }} title="Click to sort by City">
                     City {secondaryField === "city" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
@@ -1094,7 +1094,7 @@ export default function DashboardPage() {
                   displayedLeads.map((lead: Lead) => (
                     <tr key={lead.id}>
                     <td style={{ fontWeight: 600, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name}>{lead.name}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 13, maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={parsePhoneNumber(lead.phone)}>{parsePhoneNumber(lead.phone)}</td>
+                    <td style={{ fontFamily: "monospace", fontSize: 13, minWidth: "165px", maxWidth: "190px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={parsePhoneNumber(lead.phone)}>{parsePhoneNumber(lead.phone)}</td>
                     <td style={{ maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.city || "—"}>{lead.city || "—"}</td>
                     <td style={{ maxWidth: "195px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.adname || "—"}>{lead.adname || "—"}</td>
                     <td style={{ maxWidth: "185px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.branch ? parseBranches(lead.branch).join(", ") : "—"}>

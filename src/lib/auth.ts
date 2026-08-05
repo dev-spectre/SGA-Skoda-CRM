@@ -25,13 +25,13 @@ export async function ensureDefaultAdminUser() {
   if (existing.length === 0) {
     const hashedPassword = hashPassword(adminPassword);
     await prisma.$executeRawUnsafe(
-      `INSERT INTO "User" ("username", "password", "role", "assignedBranch") VALUES ($1, $2, 'ADMIN', NULL)`,
+      `INSERT INTO "User" ("username", "password", "role", "assignedBranch", "createdAt", "updatedAt") VALUES ($1, $2, 'ADMIN', NULL, NOW(), NOW())`,
       adminUsername,
       hashedPassword
     );
   } else {
     await prisma.$executeRawUnsafe(
-      `UPDATE "User" SET "role" = 'ADMIN', "assignedBranch" = NULL WHERE "username" = $1`,
+      `UPDATE "User" SET "role" = 'ADMIN', "assignedBranch" = NULL, "updatedAt" = NOW() WHERE "username" = $1`,
       adminUsername
     );
   }
