@@ -284,9 +284,9 @@ export default function DashboardPage() {
     if (updatingCountRef.current > 0 && !force) {
       return; // Stop polling while data updates are in progress
     }
-    
+
     const fetchId = ++activeFetchIdRef.current;
-    
+
     try {
       const params = new URLSearchParams();
       params.set("page", pagination.page.toString());
@@ -308,7 +308,7 @@ export default function DashboardPage() {
         setStats(cachedData.stats);
         setPagination(prev => {
           if (prev.total !== cachedData.pagination.total || prev.totalPages !== cachedData.pagination.totalPages) {
-             return { ...prev, total: cachedData.pagination.total, totalPages: cachedData.pagination.totalPages };
+            return { ...prev, total: cachedData.pagination.total, totalPages: cachedData.pagination.totalPages };
           }
           return prev;
         });
@@ -332,12 +332,12 @@ export default function DashboardPage() {
         setStats(data.stats);
         if (data.userRole) setUserRole(data.userRole);
         if (data.assignedBranch !== undefined) setUserAssignedBranch(data.assignedBranch);
-        
+
         // Only update pagination if it actually changes total pages/records
         // This prevents the page jumping from 2 to 1 back to 2 during polling
         setPagination(prev => {
           if (prev.total !== data.pagination.total || prev.totalPages !== data.pagination.totalPages) {
-             return { ...prev, total: data.pagination.total, totalPages: data.pagination.totalPages };
+            return { ...prev, total: data.pagination.total, totalPages: data.pagination.totalPages };
           }
           return prev;
         });
@@ -346,14 +346,14 @@ export default function DashboardPage() {
         if (!isBackgroundPoll) {
           const prefetchParams = new URLSearchParams(cacheKey);
           const currentPage = pagination.page;
-          
+
           const prefetchPage = (p: number) => {
             prefetchParams.set("page", p.toString());
             const pKey = prefetchParams.toString();
             if (!prefetchCache.current[pKey]) {
               fetch(`/api/leads?${pKey}`).then(r => r.json()).then(d => {
                 if (!d.error) prefetchCache.current[pKey] = d;
-              }).catch(() => {});
+              }).catch(() => { });
             }
           };
 
@@ -412,7 +412,7 @@ export default function DashboardPage() {
     };
   }, [fetchLeads, fetchBranchesList]);
 
-  
+
   const fetchAllFilteredLeads = async () => {
     try {
       const params = new URLSearchParams();
@@ -490,7 +490,7 @@ export default function DashboardPage() {
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");
-    
+
     const cols = Object.keys(exportData[0]).map(() => ({ wch: 15 }));
     worksheet['!cols'] = cols;
 
@@ -520,7 +520,7 @@ export default function DashboardPage() {
     }
 
     const doc = new jsPDF();
-    
+
     doc.setFontSize(16);
     doc.text("SGA Skoda Leads Report", 14, 15);
     doc.setFontSize(10);
@@ -625,7 +625,7 @@ export default function DashboardPage() {
     startUpdating(); // PAUSE polling while update request is processing
     activeFetchIdRef.current++; // Invalidate any in-flight requests so they don't overwrite this optimistic update
     prefetchCache.current = {}; // Clear stale cache
-    
+
     // 1. Optimistically update leads list in table immediately
     setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatus } : l));
 
@@ -822,12 +822,12 @@ export default function DashboardPage() {
       <div className="page-header">
         <h1>Dashboard</h1>
         <div className="page-actions" style={{ display: "flex", gap: 10 }}>
-          {/* <button className="btn btn-ghost" onClick={handleExportExcel} disabled={exportLoading}>
-            {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export Excel"}
+          <button className="btn btn-ghost" onClick={handleExportExcel} disabled={exportLoading}>
+            {exportLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Exporting...</> : "Export Excel"}
           </button>
           <button className="btn btn-ghost" onClick={handleExportPDF} disabled={exportLoading}>
-            {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export PDF"}
-          </button> */}
+            {exportLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Exporting...</> : "Export PDF"}
+          </button>
 
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing}>
             {syncing ? <><span className="spinner" /> Syncing...</> : (
@@ -1109,93 +1109,92 @@ export default function DashboardPage() {
                 ) : (
                   displayedLeads.map((lead: Lead) => (
                     <tr key={lead.id}>
-                    <td style={{ fontWeight: 600, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name}>{lead.name}</td>
-                    <td style={{ fontFamily: "monospace", fontSize: 13, minWidth: "165px", maxWidth: "190px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={parsePhoneNumber(lead.phone)}>{parsePhoneNumber(lead.phone)}</td>
-                    <td style={{ maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.city || "—"}>{lead.city || "—"}</td>
-                    <td style={{ maxWidth: "195px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.adname || "—"}>{lead.adname || "—"}</td>
-                    <td style={{ maxWidth: "185px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.branch ? parseBranches(lead.branch).join(", ") : "—"}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", overflow: "hidden" }}>
-                        {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
-                          <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
-                            {b}
-                          </span>
-                        )) : "—"}
-                      </div>
-                    </td>
-                    <td style={{ maxWidth: "190px" }} title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'None'}, Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'None'}`}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
-                          <input 
-                            type="date" 
-                            value={toISTDateString(lead.followUpDate1)} 
-                            title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'No date set'}`}
-                            onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
-                            className="status-select"
-                            style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
-                          />
+                      <td style={{ fontWeight: 600, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name}>{lead.name}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 13, minWidth: "165px", maxWidth: "190px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={parsePhoneNumber(lead.phone)}>{parsePhoneNumber(lead.phone)}</td>
+                      <td style={{ maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.city || "—"}>{lead.city || "—"}</td>
+                      <td style={{ maxWidth: "195px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.adname || "—"}>{lead.adname || "—"}</td>
+                      <td style={{ maxWidth: "185px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.branch ? parseBranches(lead.branch).join(", ") : "—"}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", overflow: "hidden" }}>
+                          {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
+                            <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
+                              {b}
+                            </span>
+                          )) : "—"}
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>2.</span>
-                          <input 
-                            type="date" 
-                            value={toISTDateString(lead.followUpDate2)} 
-                            title={`Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'No date set'}`}
-                            onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
-                            className="status-select"
-                            style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
-                          />
+                      </td>
+                      <td style={{ maxWidth: "190px" }} title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'None'}, Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'None'}`}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
+                            <input
+                              type="date"
+                              value={toISTDateString(lead.followUpDate1)}
+                              title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'No date set'}`}
+                              onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
+                              className="status-select"
+                              style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
+                            />
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>2.</span>
+                            <input
+                              type="date"
+                              value={toISTDateString(lead.followUpDate2)}
+                              title={`Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'No date set'}`}
+                              onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
+                              className="status-select"
+                              style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td 
-                      style={{ maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, cursor: "pointer" }} 
-                      title={getFullDateTooltip(lead.createdAt)}
-                    >
-                      {formatDate(lead.createdAt)}
-                    </td>
-                    <td style={{ maxWidth: "165px" }}>
-                      <select
-                        className={`status-select ${
-                          (lead.status === "pending" || lead.status === "created") ? "status-pending" :
-                          (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
-                        }`}
-                        value={lead.status === 'created' ? 'pending' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
-                        onChange={(e) => handleStatusChange(lead, e.target.value)}
-                        title={`Status: ${formatStatusLabel(lead.status)}`}
+                      </td>
+                      <td
+                        style={{ maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, cursor: "pointer" }}
+                        title={getFullDateTooltip(lead.createdAt)}
                       >
-                        <option value="pending">Pending Lead</option>
-                        <option value="live">Live Lead</option>
-                        <option value="lost">Lost Lead</option>
-                      </select>
-                    </td>
-                    <td className="remark-cell" style={{ maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {lead.remark ? (
-                        <span className="remark-text" title={lead.remark}>{lead.remark}</span>
-                      ) : (
-                        <span style={{ color: "var(--text-muted)", fontSize: 13 }}>—</span>
-                      )}
-                    </td>
-                    <td style={{ maxWidth: "145px" }}>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <button className="add-remark-btn" onClick={() => openRemarkModal(lead)}>
-                          {lead.remark ? "Edit" : "Add"} Remark
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ color: "#ef4444", padding: "6px 8px", borderRadius: 6 }}
-                          onClick={() => openDeleteModal(lead)}
-                          title="Delete lead"
+                        {formatDate(lead.createdAt)}
+                      </td>
+                      <td style={{ maxWidth: "165px" }}>
+                        <select
+                          className={`status-select ${(lead.status === "pending" || lead.status === "created") ? "status-pending" :
+                              (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
+                            }`}
+                          value={lead.status === 'created' ? 'pending' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
+                          onChange={(e) => handleStatusChange(lead, e.target.value)}
+                          title={`Status: ${formatStatusLabel(lead.status)}`}
                         >
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15, display: "block" }}>
-                            <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
+                          <option value="pending">Pending Lead</option>
+                          <option value="live">Live Lead</option>
+                          <option value="lost">Lost Lead</option>
+                        </select>
+                      </td>
+                      <td className="remark-cell" style={{ maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {lead.remark ? (
+                          <span className="remark-text" title={lead.remark}>{lead.remark}</span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontSize: 13 }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ maxWidth: "145px" }}>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <button className="add-remark-btn" onClick={() => openRemarkModal(lead)}>
+                            {lead.remark ? "Edit" : "Add"} Remark
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            style={{ color: "#ef4444", padding: "6px 8px", borderRadius: 6 }}
+                            onClick={() => openDeleteModal(lead)}
+                            title="Delete lead"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15, display: "block" }}>
+                              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -1260,7 +1259,7 @@ export default function DashboardPage() {
                 <>Are you sure you want to hide lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})? It will be removed from your view while remaining in the database for Administrators.</>
               )}
             </p>
-            
+
             {userRole === "ADMIN" && (
               <div style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
