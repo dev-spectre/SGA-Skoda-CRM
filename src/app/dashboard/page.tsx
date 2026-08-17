@@ -825,9 +825,9 @@ export default function DashboardPage() {
           <button className="btn btn-ghost" onClick={handleExportExcel} disabled={exportLoading}>
             {exportLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Exporting...</> : "Export Excel"}
           </button>
-          <button className="btn btn-ghost" onClick={handleExportPDF} disabled={exportLoading}>
+          {/* <button className="btn btn-ghost" onClick={handleExportPDF} disabled={exportLoading}>
             {exportLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Exporting...</> : "Export PDF"}
-          </button>
+          </button> */}
 
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing}>
             {syncing ? <><span className="spinner" /> Syncing...</> : (
