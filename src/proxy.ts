@@ -6,7 +6,7 @@ const COOKIE_NAME = 'sga-session';
 
 const publicPaths = ['/login', '/api/auth/login', '/api/webhooks', '/api/notifications', '/api/push/subscribe', '/sw.js'];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   
   // Allow public paths
@@ -41,6 +41,12 @@ export async function middleware(request: NextRequest) {
     if (pathname === '/login') {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
+
+    // Redirect singular /consultant to plural /consultants
+    if (pathname === '/consultant') {
+      return NextResponse.redirect(new URL('/consultants', request.url));
+    }
+
     
     return NextResponse.next();
   } catch {

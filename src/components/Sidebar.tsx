@@ -35,7 +35,7 @@ export function Sidebar() {
     router.push("/login");
   };
 
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "ADMIN" || user?.role === "SUPERADMIN";
 
   return (
     <aside className="sidebar">
@@ -77,18 +77,32 @@ export function Sidebar() {
         </Link>
 
         {isAdmin && (
-          <Link
-            href="/accounts"
-            className={`sidebar-link ${pathname === "/accounts" ? "active" : ""}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            Accounts
-          </Link>
+          <>
+            <Link
+              href="/consultants"
+              className={`sidebar-link ${pathname === "/consultants" ? "active" : ""}`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              Consultants
+            </Link>
+            <Link
+              href="/accounts"
+              className={`sidebar-link ${pathname === "/accounts" ? "active" : ""}`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              Accounts
+            </Link>
+          </>
         )}
 
         <Link
@@ -107,7 +121,7 @@ export function Sidebar() {
         {user && (
           <div style={{ marginBottom: 12, padding: "0 4px" }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }}>{user.username}</div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 2, flexWrap: "wrap" }}>
               <span
                 style={{
                   fontSize: 10,
@@ -115,8 +129,19 @@ export function Sidebar() {
                   textTransform: "uppercase",
                   padding: "1px 6px",
                   borderRadius: 4,
-                  background: user.role === "ADMIN" ? "rgba(0, 200, 83, 0.15)" : "rgba(33, 150, 243, 0.15)",
-                  color: user.role === "ADMIN" ? "#00e676" : "#448aff",
+                  background:
+                    user.role === "SUPERADMIN"
+                      ? "linear-gradient(135deg, rgba(147, 51, 234, 0.25), rgba(79, 70, 229, 0.25))"
+                      : user.role === "ADMIN"
+                      ? "rgba(0, 200, 83, 0.15)"
+                      : "rgba(33, 150, 243, 0.15)",
+                  color:
+                    user.role === "SUPERADMIN"
+                      ? "#a855f7"
+                      : user.role === "ADMIN"
+                      ? "#00e676"
+                      : "#448aff",
+                  border: user.role === "SUPERADMIN" ? "1px solid rgba(168, 85, 247, 0.4)" : "none",
                 }}
               >
                 {user.role}
@@ -139,6 +164,7 @@ export function Sidebar() {
           Logout
         </button>
       </div>
+
     </aside>
   );
 }

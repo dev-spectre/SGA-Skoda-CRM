@@ -44,12 +44,14 @@ export async function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    if (!isAdmin) {
       return NextResponse.json(
         { error: 'Unauthorized. Only Administrators can change system settings.' },
         { status: 403 }
       );
     }
+
 
     const body = await request.json();
     const { notificationInterval, columnMapping, backgroundNotificationsEnabled } = body;

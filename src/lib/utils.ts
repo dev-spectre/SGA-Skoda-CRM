@@ -58,7 +58,11 @@ export function parseBranches(branchStr: string | null | undefined): string[] {
   const parsed = String(branchStr).split(',').map(b => {
     const clean = b.replace(/[_-]/g, ' ').trim().replace(/\s+/g, ' ').toLowerCase();
     if (!clean) return '';
-    return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    return clean.split(' ').map(w => {
+      if (w.toLowerCase() === 'mtp') return 'MTP';
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    }).join(' ');
   }).filter(Boolean);
   return Array.from(new Set(parsed));
 }
+

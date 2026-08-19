@@ -160,6 +160,11 @@ body::before {
   max-width: 100%;
   overflow: hidden;
 }
+.glass-card.overflow-visible,
+.filter-card {
+  overflow: visible !important;
+}
+
 
 /* Stats */
 .stats-grid {
@@ -198,7 +203,11 @@ body::before {
 .filter-bar {
   display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center;
   width: 100%; max-width: 100%;
+  position: relative;
+  z-index: 100;
+  overflow: visible;
 }
+
 .filter-bar input, .filter-bar select {
   padding: 10px 16px;
   background: var(--bg-dark);
@@ -279,7 +288,7 @@ body::before {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 1100px;
+  min-width: max-content;
 }
 
 thead th {
@@ -292,18 +301,12 @@ thead th {
   border-bottom: 1px solid var(--border);
   background: rgba(16, 185, 129,0.03);
   white-space: nowrap;
-  max-width: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 tbody td {
   padding: 14px 16px;
   font-size: 14px;
-  border-bottom: 1px solid rgba(16, 185, 129,0.06);
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
-  max-width: 18rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 tbody tr { transition: background 0.15s; }
@@ -326,7 +329,8 @@ tbody tr:hover { background: var(--bg-card-hover); }
   text-transform: capitalize;
   white-space: nowrap;
 }
-.status-badge.pending, .status-badge.created { background: rgba(255,213,79,0.15); color: var(--status-created); border: 1px solid rgba(255,213,79,0.3); }
+.status-badge.not_contacted, .status-badge.created { background: rgba(100, 116, 139, 0.12); color: #475569; border: 1px solid rgba(100, 116, 139, 0.25); }
+.status-badge.pending { background: rgba(245, 158, 11, 0.15); color: #d97706; border: 1px solid rgba(245, 158, 11, 0.3); }
 .status-badge.live, .status-badge.closed_successful { background: rgba(16, 185, 129,0.15); color: var(--status-success); border: 1px solid rgba(16, 185, 129,0.3); }
 .status-badge.lost, .status-badge.closed_unsuccessful { background: rgba(255,82,82,0.15); color: var(--status-fail); border: 1px solid rgba(255,82,82,0.3); }
 .status-badge::before {
@@ -374,6 +378,13 @@ select:focus, select:hover {
   transition: all 0.2s ease;
   border: 1.5px solid #cbd5e1 !important;
   background-color: #ffffff !important;
+}
+
+.status-select.status-not_contacted,
+.status-select.status-created {
+  background-color: #f8fafc !important;
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
 }
 
 .status-select.status-pending {

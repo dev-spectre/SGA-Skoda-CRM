@@ -9,9 +9,11 @@ export async function PATCH(
 ) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    if (!isAdmin) {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 403 });
     }
+
 
     const { id } = await params;
     const userId = parseInt(id);
@@ -20,25 +22,15 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { username, password, role, assignedBranch } = body;
+    const { username, password, role, assignedBranch, assignedPlatform, allowExternalUpload } = body;
 
-    const existingUsers: any[] = await prisma.$queryRawUnsafe(
-      `SELECT * FROM "User" WHERE "id" = $1 LIMIT 1`,
-      userId
-    );
-    if (existingUsers.length === 0) {
+    const currentUserObj = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!currentUserObj) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const currentUserObj = existingUsers[0];
-    
-    // Prevent Admin self-demotion or demotion of primary super admin account
-    if ((currentUser.userId === userId || currentUserObj.username === 'admin') && role && role !== 'ADMIN') {
-      return NextResponse.json(
-        { error: 'Administrator role cannot be demoted to a lower role' },
-        { status: 400 }
-      );
-    }
 
     const newUsername = username !== undefined ? username.trim() : currentUserObj.username;
     const newPassword = password !== undefined && password.trim() !== '' 
@@ -46,20 +38,30 @@ export async function PATCH(
       : currentUserObj.password;
     const newRole = role !== undefined ? (role === 'ADMIN' ? 'ADMIN' : 'USER') : currentUserObj.role;
     const newAssignedBranch = assignedBranch !== undefined ? (assignedBranch ? assignedBranch.trim() : null) : currentUserObj.assignedBranch;
+    const newAssignedPlatform = assignedPlatform !== undefined ? (assignedPlatform ? assignedPlatform.trim() : null) : currentUserObj.assignedPlatform;
 
-    const updatedUsers: any[] = await prisma.$queryRawUnsafe(
-      `UPDATE "User" 
-       SET "username" = $1, "password" = $2, "role" = $3, "assignedBranch" = $4, "updatedAt" = CURRENT_TIMESTAMP 
-       WHERE "id" = $5 
-       RETURNING "id", "username", "role", "assignedBranch", "updatedAt"`,
-      newUsername,
-      newPassword,
-      newRole,
-      newAssignedBranch,
-      userId
-    );
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        username: newUsername,
+        password: newPassword,
+        role: newRole,
+        assignedBranch: newAssignedBranch,
+        assignedPlatform: newAssignedPlatform,
+        allowExternalUpload: allowExternalUpload !== undefined ? Boolean(allowExternalUpload) : currentUserObj.allowExternalUpload,
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        assignedBranch: true,
+        assignedPlatform: true,
+        allowExternalUpload: true,
+        updatedAt: true,
+      },
+    });
 
-    return NextResponse.json({ user: updatedUsers[0] });
+    return NextResponse.json({ user });
   } catch (error) {
     console.error('Error updating user:', error);
     return NextResponse.json({ error: 'Failed to update user' }, { status: 500 });
@@ -72,9 +74,11 @@ export async function DELETE(
 ) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    if (!isAdmin) {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 403 });
     }
+
 
     const { id } = await params;
     const userId = parseInt(id);
@@ -86,10 +90,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Cannot delete your own admin account' }, { status: 400 });
     }
 
-    await prisma.$executeRawUnsafe(
-      `DELETE FROM "User" WHERE "id" = $1`,
-      userId
-    );
+    await prisma.user.delete({
+      where: { id: userId },
+    });
 
     return NextResponse.json({ success: true, message: 'User deleted successfully' });
   } catch (error) {

@@ -264,6 +264,26 @@ export async function updateSheetRow(
   });
 }
 
+export async function appendSheetRow(
+  spreadsheetId: string,
+  sheetName: string,
+  rowValues: (string | number)[]
+) {
+  const auth = await getAuthenticatedClient();
+  const sheets = google.sheets({ version: 'v4', auth });
+  
+  const response = await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${sheetName}!A1`,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: {
+      values: [rowValues],
+    },
+  });
+  return response.data;
+}
+
 export async function clearSheetRow(
   spreadsheetId: string,
   sheetName: string,
@@ -322,11 +342,11 @@ export async function cleanEmptySheetRows(
   sheetName: string
 ) {
   try {
-    const rows = await getSheetData(spreadsheetId, sheetName);
-    if (!rows || rows.length <= 1) return;
-
     const auth = await getAuthenticatedClient();
     const sheets = google.sheets({ version: 'v4', auth });
+
+    const rows = await getSheetData(spreadsheetId, sheetName);
+    if (!rows || rows.length <= 1) return;
 
     const spreadsheet = await sheets.spreadsheets.get({
       spreadsheetId,
@@ -374,9 +394,14 @@ export async function cleanEmptySheetRows(
 export async function findAndWriteToSheetRow(
   spreadsheetId: string,
   sheetName: string,
-  lead: { id: number; name: string; phone: string; email?: string; sheetRow?: number | null },
+  lead: { id: number; name: string; phone: string; email?: string; sheetRow?: number | null; source?: string | null; uploadedById?: number | null },
   updates: { col: number; value: string }[]
 ): Promise<number | null> {
+  // External upload leads are strictly fetch-only and must NEVER write data back to sheets
+  if (lead.source === 'External Upload' || (lead.uploadedById !== null && lead.uploadedById !== undefined)) {
+    return null;
+  }
+
   const settings = await prisma.settings.findUnique({ where: { id: 1 } });
   if (!settings?.googleAccessToken) return null;
 
@@ -433,11 +458,12 @@ export async function findAndWriteToSheetRow(
     // Format status values to user-friendly labels for the spreadsheet
     const formattedUpdates = updates.map(u => {
       if (mapping.status !== undefined && u.col === mapping.status) {
-        const val = u.value.toLowerCase();
+        const val = u.value.toLowerCase().trim();
         let formatted = u.value;
-        if (val === 'pending' || val === 'created') formatted = 'Pending Lead';
-        else if (val === 'live' || val === 'closed_successful') formatted = 'Live Lead';
-        else if (val === 'lost' || val === 'closed_unsuccessful') formatted = 'Lost Lead';
+        if (val === 'not_contacted' || val === 'created') formatted = 'Not Contacted';
+        else if (val === 'pending') formatted = 'Contacted';
+        else if (val === 'live' || val === 'closed_successful') formatted = 'Completed';
+        else if (val === 'lost' || val === 'closed_unsuccessful') formatted = 'Lost';
         return { col: u.col, value: formatted };
       }
       return u;
@@ -446,11 +472,73 @@ export async function findAndWriteToSheetRow(
     await updateSheetRow(spreadsheetId, sheetName, targetRowIndex, formattedUpdates);
     await prisma.lead.update({
       where: { id: lead.id },
-      data: { sheetRow: targetRowIndex },
+      data: { sheetRow: targetRowIndex, sheetId: spreadsheetId },
     });
     return targetRowIndex;
   } else {
-    console.warn(`Could not locate matching Google Sheet row for lead ID ${lead.id} ("${lead.name}", "${lead.phone}")`);
+    // Lead was deleted or missing from the sheet, but is updated in CRM: write it back by appending to the sheet!
+    try {
+      const fullLead = await prisma.lead.findUnique({ where: { id: lead.id } });
+      if (fullLead) {
+        let maxCol = 0;
+        for (const colIdx of Object.values(mapping)) {
+          if (typeof colIdx === 'number' && colIdx > maxCol) {
+            maxCol = colIdx;
+          }
+        }
+        const newRow: string[] = new Array(maxCol + 1).fill('');
+
+        if (mapping.name !== undefined && mapping.name >= 0) newRow[mapping.name] = fullLead.name || '';
+        if (mapping.phone !== undefined && mapping.phone >= 0) newRow[mapping.phone] = fullLead.phone || '';
+        if (mapping.email !== undefined && mapping.email >= 0) newRow[mapping.email] = fullLead.email || '';
+        if (mapping.city !== undefined && mapping.city >= 0) newRow[mapping.city] = fullLead.city || '';
+        if (mapping.adname !== undefined && mapping.adname >= 0) newRow[mapping.adname] = fullLead.adname || '';
+        if (mapping.branch !== undefined && mapping.branch >= 0) newRow[mapping.branch] = fullLead.branch || '';
+        if (mapping.platform !== undefined && mapping.platform >= 0) newRow[mapping.platform] = fullLead.platform || '';
+        if (mapping.assignedConsultant !== undefined && mapping.assignedConsultant >= 0) newRow[mapping.assignedConsultant] = fullLead.assignedConsultant || '';
+        if (mapping.testDrive !== undefined && mapping.testDrive >= 0) newRow[mapping.testDrive] = fullLead.testDrive || '';
+        if (mapping.createdAt !== undefined && mapping.createdAt >= 0) newRow[mapping.createdAt] = fullLead.createdAt ? fullLead.createdAt.toISOString().split('T')[0] : '';
+        if (mapping.followUpDate1 !== undefined && mapping.followUpDate1 >= 0) newRow[mapping.followUpDate1] = fullLead.followUpDate1 ? fullLead.followUpDate1.toISOString().split('T')[0] : '';
+        if (mapping.followUpDate2 !== undefined && mapping.followUpDate2 >= 0) newRow[mapping.followUpDate2] = fullLead.followUpDate2 ? fullLead.followUpDate2.toISOString().split('T')[0] : '';
+
+        if (mapping.status !== undefined && mapping.status >= 0) {
+          const val = (fullLead.status || '').toLowerCase().trim();
+          let formatted = 'Not Contacted';
+          if (val === 'pending') formatted = 'Contacted';
+          else if (val === 'live' || val === 'closed_successful') formatted = 'Completed';
+          else if (val === 'lost' || val === 'closed_unsuccessful') formatted = 'Lost';
+          newRow[mapping.status] = formatted;
+        }
+        if (mapping.remark !== undefined && mapping.remark >= 0) newRow[mapping.remark] = fullLead.remark || '';
+
+        // Apply current updates
+        for (const u of updates) {
+          if (u.col >= 0 && u.col < newRow.length) {
+            if (mapping.status !== undefined && u.col === mapping.status) {
+              const val = u.value.toLowerCase().trim();
+              let formatted = u.value;
+              if (val === 'not_contacted' || val === 'created') formatted = 'Not Contacted';
+              else if (val === 'pending') formatted = 'Contacted';
+              else if (val === 'live' || val === 'closed_successful') formatted = 'Completed';
+              else if (val === 'lost' || val === 'closed_unsuccessful') formatted = 'Lost';
+              newRow[u.col] = formatted;
+            } else {
+              newRow[u.col] = u.value;
+            }
+          }
+        }
+
+        await appendSheetRow(spreadsheetId, sheetName, newRow);
+        const newRowIdx = rows.length + 1;
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: { sheetRow: newRowIdx, sheetId: spreadsheetId },
+        });
+        return newRowIdx;
+      }
+    } catch (appendErr) {
+      console.error(`Failed to append lead ${lead.id} back to Google Sheet:`, appendErr);
+    }
     return null;
   }
 }
@@ -458,8 +546,12 @@ export async function findAndWriteToSheetRow(
 export async function findAndDeleteSheetRow(
   spreadsheetId: string,
   sheetName: string,
-  lead: { id: number; name: string; phone: string; email?: string; sheetRow?: number | null }
+  lead: { id: number; name: string; phone: string; email?: string; sheetRow?: number | null; source?: string | null; uploadedById?: number | null }
 ): Promise<boolean> {
+  // External upload leads are strictly fetch-only and must NEVER write data back to sheets
+  if (lead.source === 'External Upload' || (lead.uploadedById !== null && lead.uploadedById !== undefined)) {
+    return false;
+  }
   const settings = await prisma.settings.findUnique({ where: { id: 1 } });
   if (!settings?.googleAccessToken) return false;
 

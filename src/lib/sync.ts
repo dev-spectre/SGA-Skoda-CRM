@@ -14,6 +14,7 @@ interface ColumnMapping {
   createdAt: number;
   remark: number;
   status: number;
+  platform?: number;
 }
 
 const DEFAULT_MAPPING: ColumnMapping = {
@@ -28,6 +29,7 @@ const DEFAULT_MAPPING: ColumnMapping = {
   branch: 8,
   followUpDate1: 9,
   followUpDate2: 10,
+  platform: 11,
 };
 
 function isLowQualityLead(name: string, phone: string, email: string, city: string): boolean {
@@ -40,54 +42,31 @@ function isLowQualityLead(name: string, phone: string, email: string, city: stri
 
 export async function deduplicateDatabaseLeads() {
   try {
-    const allLeads = await prisma.lead.findMany({
-      orderBy: { updatedAt: 'desc' },
-    });
-
-    const seenIdenticalLeads = new Set<string>();
-    const duplicateIdsToDelete: number[] = [];
-
-    for (const lead of allLeads) {
-      const cleanPhone = parsePhoneNumber(lead.phone);
-      const cleanName = (lead.name || '').trim().toLowerCase();
-      const cleanEmail = (lead.email || '').trim().toLowerCase();
-      const cleanCity = (lead.city || '').trim().toLowerCase();
-      // Fingerprint of all core lead columns
-      const leadFingerprint = `${cleanName}|${cleanPhone}|${cleanEmail}|${cleanCity}`;
-
-      if (seenIdenticalLeads.has(leadFingerprint)) {
-        duplicateIdsToDelete.push(lead.id);
-      } else {
-        seenIdenticalLeads.add(leadFingerprint);
-      }
-    }
-
-    if (duplicateIdsToDelete.length > 0) {
-      await prisma.lead.deleteMany({
-        where: { id: { in: duplicateIdsToDelete } },
-      });
-      console.log(`🧹 Deduplicated ${duplicateIdsToDelete.length} duplicate entries in database.`);
-    }
+    const { executeDeleteDuplicateLeads } = await import('@/lib/deduplicate');
+    const result = await executeDeleteDuplicateLeads();
+    console.log(`🧹 Deduplicated ${result.duplicateCount} duplicate entries in database.`);
+    return result;
   } catch (err) {
     console.error('Failed to deduplicate database leads:', err);
+    return { duplicateCount: 0 };
   }
 }
 
 export async function performSheetSync() {
-  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  try {
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
 
-  if (!settings?.selectedSpreadsheetId || !settings?.selectedSheetName || !settings?.googleAccessToken) {
-    return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0, error: 'Settings not configured' };
-  }
+    if (!settings?.selectedSpreadsheetId || !settings?.selectedSheetName || !settings?.googleAccessToken) {
+      return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0, error: 'Settings not configured' };
+    }
 
   const mapping: ColumnMapping = settings.columnMapping
-    ? JSON.parse(settings.columnMapping)
+    ? { ...DEFAULT_MAPPING, ...JSON.parse(settings.columnMapping) }
     : DEFAULT_MAPPING;
 
   const rows = await getSheetData(settings.selectedSpreadsheetId, settings.selectedSheetName);
 
   if (!rows || rows.length <= 1) {
-    await deduplicateDatabaseLeads();
     return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0 };
   }
 
@@ -97,9 +76,33 @@ export async function performSheetSync() {
   let skippedLowQuality = 0;
   let skippedDuplicates = 0;
 
-  // 1. Fetch DB State in Bulk
+  // 1. Fetch DB State in Bulk (Only query system/sheet leads, never external uploads)
   const existingLeads = await prisma.lead.findMany({
-    select: { id: true, fingerprint: true, remark: true, status: true, name: true, phone: true, email: true, city: true, adname: true, branch: true, followUpDate1: true, followUpDate2: true, sheetRow: true },
+    where: {
+      source: { not: 'External Upload' },
+      uploadedById: null,
+    },
+    select: {
+      id: true,
+      fingerprint: true,
+      remark: true,
+      status: true,
+      name: true,
+      phone: true,
+      email: true,
+      city: true,
+      adname: true,
+      branch: true,
+      followUpDate1: true,
+      followUpDate2: true,
+      sheetRow: true,
+      assignedConsultant: true,
+      testDrive: true,
+      platform: true,
+      source: true,
+      uploadedById: true,
+      sheetId: true,
+    },
   });
 
   const existingByFingerprint = new Map<string, typeof existingLeads[0]>();
@@ -142,7 +145,18 @@ export async function performSheetSync() {
     const email = sanitizeField(rawEmail);
     const city = sanitizeField(rawCity);
 
-    // const platform = sanitizeField((row[mapping.platform] || '').toString());
+    const rawPlatform = mapping.platform !== undefined ? (row[mapping.platform] || '').toString() : '';
+    let platform = sanitizeField(rawPlatform);
+    if (platform) {
+      platform = platform.toLowerCase().split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ').trim();
+      const isDateStr = /^\d{4}-\d{2}-\d{2}$/.test(platform) || /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(platform) || (!isNaN(Date.parse(platform)) && (platform.includes('-') || platform.includes('/')));
+      if (isDateStr) {
+        platform = 'Unknown';
+      }
+    } else {
+      platform = 'Unknown';
+    }
+    
     const rawAdname = mapping.adname !== undefined ? (row[mapping.adname] || '').toString() : '';
     const rawBranch = mapping.branch !== undefined ? (row[mapping.branch] || '').toString() : '';
     const rawFollowUpDate1 = mapping.followUpDate1 !== undefined ? (row[mapping.followUpDate1] || '').toString() : '';
@@ -176,7 +190,7 @@ export async function performSheetSync() {
     const statusRaw = (row[mapping.status] || '').toString().trim().toLowerCase();
 
     // Deduplicate exact identical rows from the sheet
-    const fullDataHash = `${name}|${phone}|${email}|${city}|${adname}|${branch}|${createdAtRaw}|${remark || ''}|${statusRaw}|${followUpDate1 ? followUpDate1.getTime() : ''}|${followUpDate2 ? followUpDate2.getTime() : ''}`;
+    const fullDataHash = `${name}|${phone}|${email}|${city}|${adname}|${branch}|${createdAtRaw}|${remark || ''}|${statusRaw}|${followUpDate1 ? followUpDate1.getTime() : ''}|${followUpDate2 ? followUpDate2.getTime() : ''}|${platform}`;
     if (seenFullData.has(fullDataHash)) {
       skippedDuplicates++;
       continue;
@@ -191,11 +205,15 @@ export async function performSheetSync() {
       }
     }
 
-    let status = 'pending';
-    if (statusRaw.includes('live') || statusRaw.includes('successful') || statusRaw === 'closed_successful' || statusRaw === 'closed') {
+    let status = 'not_contacted';
+    if (statusRaw.includes('pending') || statusRaw.includes('contacted') || statusRaw.includes('follow')) {
+      status = 'pending';
+    } else if (statusRaw.includes('live') || statusRaw.includes('successful') || statusRaw === 'closed_successful' || statusRaw === 'closed' || statusRaw.includes('completed')) {
       status = 'live';
     } else if (statusRaw.includes('lost') || statusRaw.includes('unsuccessful') || statusRaw === 'closed_unsuccessful') {
       status = 'lost';
+    } else if (statusRaw.includes('not_contacted') || statusRaw.includes('not contacted') || statusRaw === 'created') {
+      status = 'not_contacted';
     }
 
     const baseFingerprint = `${phone}|${createdAtRaw}`;
@@ -216,9 +234,11 @@ export async function performSheetSync() {
     if (existing) {
       activeDbIds.add(existing.id);
 
-      const finalRemark = remark || existing.remark;
-      const normalizedExistingStatus = existing.status === 'created' ? 'pending' : existing.status === 'closed_successful' ? 'live' : existing.status === 'closed_unsuccessful' ? 'lost' : existing.status;
-      const finalStatus = normalizedExistingStatus || status || 'pending';
+      // Prioritize an intentional empty string in the DB over the sheet's remark
+      const finalRemark = existing.remark === "" ? "" : (remark || existing.remark);
+      
+      const normalizedExistingStatus = existing.status === 'created' ? 'not_contacted' : existing.status === 'closed_successful' ? 'live' : existing.status === 'closed_unsuccessful' ? 'lost' : existing.status;
+      const finalStatus = normalizedExistingStatus || status || 'not_contacted';
 
       // Only queue DB update if data actually changed
       if (
@@ -232,6 +252,7 @@ export async function performSheetSync() {
         existing.followUpDate2?.getTime() !== followUpDate2?.getTime() ||
         existing.remark !== finalRemark ||
         existing.status !== finalStatus ||
+        existing.platform !== platform ||
         existing.sheetRow !== rowNumber
       ) {
         toUpdate.push({
@@ -247,6 +268,7 @@ export async function performSheetSync() {
             followUpDate2,
             remark: finalRemark,
             status: finalStatus,
+            platform,
             sheetRow: rowNumber,
             sheetId: settings.selectedSpreadsheetId,
             fingerprint,
@@ -267,8 +289,11 @@ export async function performSheetSync() {
         createdAt,
         remark,
         status,
+        platform,
         sheetRow: rowNumber,
         sheetId: settings.selectedSpreadsheetId,
+        source: 'System',
+        uploadedById: null,
         fingerprint,
       });
       synced++;
@@ -276,11 +301,20 @@ export async function performSheetSync() {
   }
 
   // 3. Execute Bulk DB Operations
-  // Create New Leads with DB-level duplicate skipping
-  const chunkSize = 2000;
+  // Create New Leads with DB-level duplicate skipping using upsert
+  const chunkSize = 50;
   for (let i = 0; i < toCreate.length; i += chunkSize) {
     const chunk = toCreate.slice(i, i + chunkSize);
-    await prisma.lead.createMany({ data: chunk, skipDuplicates: true });
+    const createPromises = chunk.map(data => 
+      prisma.lead.upsert({
+        where: { fingerprint: data.fingerprint },
+        update: data,
+        create: data
+      }).catch(e => {
+        console.error(`Create/Upsert failed for fingerprint ${data.fingerprint}:`, e);
+      })
+    );
+    await Promise.all(createPromises);
   }
 
   // Update Existing Leads in chunks of 50 concurrent updates
@@ -296,46 +330,34 @@ export async function performSheetSync() {
     await Promise.all(updatePromises);
   }
 
-  // 4. Safe Cleanup
-  // Only delete leads that have a fingerprint, are NOT active matched leads,
-  // AND whose phone number is not present in the current spreadsheet!
-  const idsToDelete = existingLeads
-    .filter(l => {
-      if (!l.fingerprint) return false;
-      if (activeDbIds.has(l.id)) return false;
-      const cleanLeadPhone = parsePhoneNumber(l.phone);
-      if (cleanLeadPhone && currentSheetPhones.has(cleanLeadPhone)) return false;
-      return true;
-    })
-    .map(l => l.id);
-
-  for (let i = 0; i < idsToDelete.length; i += chunkSize) {
-    const chunk = idsToDelete.slice(i, i + chunkSize);
-    await prisma.lead.deleteMany({
-      where: { id: { in: chunk } }
-    });
-  }
-
-  if (idsToDelete.length > 0) {
-    console.log(`🧹 Safe Cleanup: Removed ${idsToDelete.length} obsolete leads.`);
-  }
+  // 4. Preserve All Database Leads
+  // Leads removed or missing from the Google Sheet are preserved in the database and visible in dashboard.
 
   await prisma.settings.update({
     where: { id: 1 },
     data: { lastSyncAt: new Date() },
   });
 
-  return {
-    synced,
-    duplicates,
-    skippedLowQuality,
-    skippedDuplicates,
-    total: dataRows.length,
-  };
+    return {
+      synced,
+      duplicates,
+      skippedLowQuality,
+      skippedDuplicates,
+      total: dataRows.length,
+    };
+  } catch (err: any) {
+    console.error('Auto background sheet sync error:', err?.message || err);
+    return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0, error: err?.message || String(err) };
+  }
 }
 
 export async function clearAndResyncDatabase() {
-  await prisma.lead.deleteMany();
-  console.log('🧹 Purged corrupt database data.');
+  await prisma.lead.deleteMany({
+    where: {
+      source: { not: 'External Upload' },
+      uploadedById: null,
+    },
+  });
+  console.log('🧹 Purged sheet leads database data (preserved external uploads).');
   return await performSheetSync();
 }

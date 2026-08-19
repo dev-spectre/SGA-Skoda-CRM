@@ -2,9 +2,13 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parsePhoneNumber, parseBranches } from "@/lib/utils";
+import BranchConsultantPicker from "@/components/BranchConsultantPicker";
+import { ExternalUploadModal } from "@/components/ExternalUploadModal";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+
 
 
 interface Lead {
@@ -20,10 +24,35 @@ interface Lead {
   remark: string | null;
   status: string;
   createdAt: string;
+  assignedConsultant?: string;
+  testDrive?: string;
+  platform?: string;
+  source?: string;
+  uploadedById?: number | null;
+  uploadedBy?: { id?: number; username: string } | null;
+  uploadedAt?: string | null;
+}
+
+interface PerformanceStat {
+  consultant: string;
+  total: number;
+  notContacted: number;
+  pending: number;
+  live: number;
+  lost: number;
+  testDriveYes: number;
+  testDriveNo: number;
+}
+
+interface ConsultantItem {
+  id: number;
+  name: string;
+  branch: string;
 }
 
 interface Stats {
   total: number;
+  notContacted?: number;
   pending?: number;
   live?: number;
   lost?: number;
@@ -40,9 +69,10 @@ interface Pagination {
 }
 
 const formatStatusLabel = (st: string) => {
-  if (st === 'pending' || st === 'created') return 'Pending Lead';
-  if (st === 'live' || st === 'closed_successful') return 'Live Lead';
-  if (st === 'lost' || st === 'closed_unsuccessful') return 'Lost Lead';
+  if (st === 'not_contacted' || st === 'created') return 'Not Contacted';
+  if (st === 'pending') return 'Contacted';
+  if (st === 'live' || st === 'closed_successful') return 'Completed';
+  if (st === 'lost' || st === 'closed_unsuccessful') return 'Lost';
   return st.replace('_', ' ');
 };
 
@@ -104,7 +134,11 @@ export default function DashboardPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
+  const [consultantFilter, setConsultantFilter] = useState("");
+  const [testDriveFilter, setTestDriveFilter] = useState("");
+  const [uploaderFilter, setUploaderFilter] = useState("");
   const [startDate, setStartDate] = useState("");
+
   const [endDate, setEndDate] = useState("");
 
   const [dateModalOpen, setDateModalOpen] = useState(false);
@@ -118,6 +152,11 @@ export default function DashboardPage() {
   const [username, setUsername] = useState<string>("");
   const [userRole, setUserRole] = useState<string>("USER");
   const [userAssignedBranch, setUserAssignedBranch] = useState<string | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+
+  const [performanceStats, setPerformanceStats] = useState<PerformanceStat[]>([]);
+  const [consultantsList, setConsultantsList] = useState<ConsultantItem[]>([]);
+  const [usersList, setUsersList] = useState<{ id: number; username: string; role: string }[]>([]);
 
   // Restore saved filters from localStorage per authenticated user
   const restoreUserFilters = useCallback((userKey: string) => {
@@ -129,7 +168,11 @@ export default function DashboardPage() {
         if (typeof parsed.search === "string") setSearch(parsed.search);
         if (typeof parsed.statusFilter === "string") setStatusFilter(parsed.statusFilter);
         if (typeof parsed.branchFilter === "string") setBranchFilter(parsed.branchFilter);
+        if (typeof parsed.consultantFilter === "string") setConsultantFilter(parsed.consultantFilter);
+        if (typeof parsed.testDriveFilter === "string") setTestDriveFilter(parsed.testDriveFilter);
+        if (typeof parsed.uploaderFilter === "string") setUploaderFilter(parsed.uploaderFilter);
         if (typeof parsed.startDate === "string") setStartDate(parsed.startDate);
+
         if (typeof parsed.endDate === "string") setEndDate(parsed.endDate);
         if (parsed.primaryOrder === "asc" || parsed.primaryOrder === "desc") setPrimaryOrder(parsed.primaryOrder);
         if (typeof parsed.secondaryField === "string") setSecondaryField(parsed.secondaryField);
@@ -142,7 +185,20 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchUsersList = useCallback(async () => {
+    try {
+      const res = await fetch("/api/users");
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.users)) {
+        setUsersList(data.users);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
+    fetchUsersList();
     fetch("/api/auth/me")
       .then((res) => res.json())
       .then((data) => {
@@ -151,15 +207,38 @@ export default function DashboardPage() {
           if (userObj.username) setUsername(userObj.username);
           if (userObj.role) setUserRole(userObj.role);
           if (userObj.assignedBranch !== undefined) setUserAssignedBranch(userObj.assignedBranch);
+          const isSuper = Boolean(userObj.isSuperAdmin || userObj.role === "SUPERADMIN" || userObj.username === "sudo");
+          setIsSuperAdmin(isSuper);
+          if (userObj.role === "ADMIN" || userObj.role === "SUPERADMIN" || isSuper || userObj.allowExternalUpload) {
+            setAllowExternalUpload(true);
+          }
           restoreUserFilters(userObj.username);
+
         } else {
           restoreUserFilters("");
+        }
+
+
+        if (typeof window !== "undefined") {
+          const urlParams = new URLSearchParams(window.location.search);
+          const consultantParam = urlParams.get("consultant");
+          const testDriveParam = urlParams.get("testDrive");
+          const branchParam = urlParams.get("branch");
+          const statusParam = urlParams.get("status");
+          const uploaderParam = urlParams.get("uploader");
+
+          if (consultantParam !== null) setConsultantFilter(consultantParam);
+          if (testDriveParam !== null) setTestDriveFilter(testDriveParam);
+          if (branchParam !== null) setBranchFilter(branchParam);
+          if (statusParam !== null) setStatusFilter(statusParam);
+          if (uploaderParam !== null) setUploaderFilter(uploaderParam);
         }
       })
       .catch(() => {
         restoreUserFilters("");
       });
-  }, [restoreUserFilters]);
+
+  }, [restoreUserFilters, fetchUsersList]);
 
   // Persist filter changes to localStorage per authenticated user
   useEffect(() => {
@@ -170,7 +249,11 @@ export default function DashboardPage() {
         search,
         statusFilter,
         branchFilter,
+        consultantFilter,
+        testDriveFilter,
+        uploaderFilter,
         startDate,
+
         endDate,
         primaryOrder,
         secondaryField,
@@ -180,9 +263,13 @@ export default function DashboardPage() {
     } catch (e) {
       console.error("Failed to save dashboard filters to localStorage:", e);
     }
-  }, [search, statusFilter, branchFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
+  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
+
   const [loading, setLoading] = useState(true);
+  const [accessRestricted, setAccessRestricted] = useState(false);
+  const [allowExternalUpload, setAllowExternalUpload] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [externalSyncModalOpen, setExternalSyncModalOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
 
@@ -226,6 +313,7 @@ export default function DashboardPage() {
   const [remarkModal, setRemarkModal] = useState<Lead | null>(null);
   const [remarkText, setRemarkText] = useState("");
   const [remarkLoading, setRemarkLoading] = useState(false);
+
 
   // Delete modal
   const [deleteModal, setDeleteModal] = useState<Lead | null>(null);
@@ -280,6 +368,31 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchConsultantsList = useCallback(async () => {
+    try {
+      const res = await fetch("/api/consultants");
+      const data = await res.json();
+      if (res.ok && Array.isArray(data.consultants)) {
+        setConsultantsList(data.consultants);
+      }
+    } catch {
+      // fallback
+    }
+  }, []);
+
+  const fetchPerformanceStats = useCallback(async () => {
+    if (userRole !== "ADMIN") return;
+    try {
+      const res = await fetch("/api/leads/performance");
+      const data = await res.json();
+      if (res.ok && data.performance) {
+        setPerformanceStats(data.performance);
+      }
+    } catch {
+      // silently fail
+    }
+  }, [userRole]);
+
   const fetchLeads = useCallback(async (force = false, isBackgroundPoll = false) => {
     if (updatingCountRef.current > 0 && !force) {
       return; // Stop polling while data updates are in progress
@@ -297,7 +410,19 @@ export default function DashboardPage() {
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
       if (branchFilter) params.set("branch", branchFilter);
+      if (consultantFilter) params.set("consultant", consultantFilter);
+      if (testDriveFilter) params.set("testDrive", testDriveFilter);
+      if (uploaderFilter) {
+        if (uploaderFilter === 'system') {
+          params.set('source', 'System');
+        } else if (uploaderFilter === 'external') {
+          params.set('source', 'External Upload');
+        } else if (uploaderFilter.startsWith('user:')) {
+          params.set('uploader', uploaderFilter.replace('user:', ''));
+        }
+      }
       if (startDate) params.set("startDate", startDate);
+
       if (endDate) params.set("endDate", endDate);
 
       const cacheKey = params.toString();
@@ -327,11 +452,23 @@ export default function DashboardPage() {
         return; // Ignore stale response
       }
 
-      if (res.ok) {
+      if (res.status === 403) {
+        setAccessRestricted(true);
+        setLeads([]);
+      } else if (res.ok) {
+        setAccessRestricted(false);
         setLeads(data.leads);
         setStats(data.stats);
-        if (data.userRole) setUserRole(data.userRole);
+        if (data.userRole) {
+          setUserRole(data.userRole);
+          if (data.userRole === "ADMIN" || data.userRole === "SUPERADMIN") fetchPerformanceStats();
+        }
+
         if (data.assignedBranch !== undefined) setUserAssignedBranch(data.assignedBranch);
+        if (data.allowExternalUpload !== undefined) {
+          setAllowExternalUpload(Boolean(data.allowExternalUpload || data.userRole === "ADMIN" || data.userRole === "SUPERADMIN"));
+        }
+
 
         // Only update pagination if it actually changes total pages/records
         // This prevents the page jumping from 2 to 1 back to 2 during polling
@@ -369,14 +506,17 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, search, statusFilter, branchFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder]);
+  }, [pagination.page, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder]);
+
 
   useEffect(() => {
     fetchBranchesList();
+    fetchConsultantsList();
     setTimeout(() => fetchLeads(), 0);
 
     const handleLeadsUpdated = () => {
       fetchBranchesList();
+      fetchConsultantsList();
       fetchLeads();
     };
 
@@ -410,7 +550,7 @@ export default function DashboardPage() {
       }
       clearInterval(autoRefreshInterval);
     };
-  }, [fetchLeads, fetchBranchesList]);
+  }, [fetchLeads, fetchBranchesList, fetchConsultantsList]);
 
 
   const fetchAllFilteredLeads = async () => {
@@ -422,9 +562,11 @@ export default function DashboardPage() {
       params.set("secondaryField", secondaryField);
       params.set("secondaryOrder", secondaryOrder);
       if (search) params.set("search", search);
-      if (statusFilter) params.set("status", statusFilter);
       if (branchFilter) params.set("branch", branchFilter);
+      if (consultantFilter) params.set("consultant", consultantFilter);
+      if (testDriveFilter) params.set("testDrive", testDriveFilter);
       if (startDate) params.set("startDate", startDate);
+
       if (endDate) params.set("endDate", endDate);
 
       const res = await fetch(`/api/leads?${params}`);
@@ -439,14 +581,85 @@ export default function DashboardPage() {
   };
 
   const branches = useMemo(() => {
-    const unique = new Set<string>(apiBranches);
+    const branchMap = new Map<string, string>();
+    const add = (b: string) => {
+      if (!b) return;
+      parseBranches(b).forEach(clean => {
+        if (!clean) return;
+        const key = clean.toLowerCase();
+        if (!branchMap.has(key)) {
+          branchMap.set(key, clean === "Mtp" ? "MTP" : clean);
+        } else {
+          const existing = branchMap.get(key)!;
+          if (clean === "MTP" || (clean === clean.toUpperCase() && existing !== existing.toUpperCase())) {
+            branchMap.set(key, clean);
+          }
+        }
+      });
+    };
+
+    apiBranches.forEach(add);
     leads.forEach(l => {
-      if (l.branch) {
-        parseBranches(l.branch).forEach(b => unique.add(b));
-      }
+      if (l.branch) add(l.branch);
     });
-    return Array.from(unique).sort();
+    return Array.from(branchMap.values()).sort((a, b) => a.localeCompare(b));
   }, [leads, apiBranches]);
+
+
+  const getConsultantsForLead = useCallback((lead: Lead) => {
+    if (!lead.branch || !lead.branch.trim()) {
+      return consultantsList;
+    }
+
+    const leadBranches = parseBranches(lead.branch).map(b => b.toLowerCase().trim());
+    const rawLeadBranch = lead.branch.toLowerCase().replace(/[_-]/g, ' ').trim();
+
+    const matching = consultantsList.filter(c => {
+      if (!c.branch) return false;
+      const cBranch = c.branch.toLowerCase().trim();
+      const parsedCBranches = parseBranches(c.branch).map(b => b.toLowerCase().trim());
+
+      return (
+        leadBranches.includes(cBranch) ||
+        leadBranches.some(lb => lb === cBranch || lb.includes(cBranch) || cBranch.includes(lb)) ||
+        parsedCBranches.some(pcb => leadBranches.includes(pcb)) ||
+        rawLeadBranch.includes(cBranch)
+      );
+    });
+
+    // Ensure currently assigned consultant is included
+    if (lead.assignedConsultant && lead.assignedConsultant.trim()) {
+      const assignedName = lead.assignedConsultant.trim();
+      const alreadyIncluded = matching.some(
+        c => c.name.toLowerCase() === assignedName.toLowerCase()
+      );
+      if (!alreadyIncluded) {
+        const foundInAll = consultantsList.find(
+          c => c.name.toLowerCase() === assignedName.toLowerCase()
+        );
+        if (foundInAll) {
+          return [foundInAll, ...matching];
+        } else {
+          return [{ id: -1, name: assignedName, branch: lead.branch || '' }, ...matching];
+        }
+      }
+    }
+
+    return matching;
+  }, [consultantsList]);
+
+  const filteredConsultantsForFilterBar = useMemo(() => {
+    const activeBranch = branchFilter || (userRole !== "ADMIN" ? userAssignedBranch : "");
+    if (!activeBranch) {
+      return consultantsList;
+    }
+    const cleanActive = activeBranch.toLowerCase().trim();
+    return consultantsList.filter(c => {
+      if (!c.branch) return false;
+      const cBranch = c.branch.toLowerCase().trim();
+      return cBranch.includes(cleanActive) || cleanActive.includes(cBranch);
+    });
+  }, [consultantsList, branchFilter, userRole, userAssignedBranch]);
 
   const displayedLeads = useMemo(() => {
     if (!branchFilter) return leads;
@@ -613,8 +826,8 @@ export default function DashboardPage() {
 
   const handleStatusChange = async (lead: Lead, newStatus: string) => {
     const oldStatus = lead.status;
-    const normOld = (oldStatus === 'created' ? 'pending' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus) as 'pending' | 'live' | 'lost';
-    const normNew = (newStatus === 'created' ? 'pending' : newStatus === 'closed_successful' ? 'live' : newStatus === 'closed_unsuccessful' ? 'lost' : newStatus) as 'pending' | 'live' | 'lost';
+    const normOld = (oldStatus === 'created' ? 'not_contacted' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus) as 'not_contacted' | 'pending' | 'live' | 'lost';
+    const normNew = (newStatus === 'created' ? 'not_contacted' : newStatus === 'closed_successful' ? 'live' : newStatus === 'closed_unsuccessful' ? 'lost' : newStatus) as 'not_contacted' | 'pending' | 'live' | 'lost';
 
     if (normOld === normNew) return;
 
@@ -632,10 +845,12 @@ export default function DashboardPage() {
     // 2. Optimistically update stats counters immediately!
     setStats(prev => {
       const updated = { ...prev };
+      if (normOld === 'not_contacted') updated.notContacted = Math.max(0, (updated.notContacted ?? 0) - 1);
       if (normOld === 'pending') updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
       if (normOld === 'live') updated.live = Math.max(0, (updated.live ?? 0) - 1);
       if (normOld === 'lost') updated.lost = Math.max(0, (updated.lost ?? 0) - 1);
 
+      if (normNew === 'not_contacted') updated.notContacted = (updated.notContacted ?? 0) + 1;
       if (normNew === 'pending') updated.pending = (updated.pending ?? 0) + 1;
       if (normNew === 'live') updated.live = (updated.live ?? 0) + 1;
       if (normNew === 'lost') updated.lost = (updated.lost ?? 0) + 1;
@@ -669,8 +884,8 @@ export default function DashboardPage() {
   };
 
   const handleAddRemark = async () => {
-    if (!remarkModal || !remarkText.trim()) return;
-    const isPending = remarkModal.status === "pending" || remarkModal.status === "created";
+    if (!remarkModal) return;
+    const isPending = remarkModal.status === "pending" || remarkModal.status === "not_contacted" || remarkModal.status === "created";
     setRemarkLoading(true);
 
     const prevLeads = [...leads];
@@ -688,11 +903,16 @@ export default function DashboardPage() {
     } : l));
 
     if (isPending) {
-      setStats(prev => ({
-        ...prev,
-        pending: Math.max(0, (prev.pending ?? 0) - 1),
-        live: (prev.live ?? 0) + 1,
-      }));
+      setStats(prev => {
+        const updated = { ...prev };
+        if (remarkModal.status === "not_contacted" || remarkModal.status === "created") {
+          updated.notContacted = Math.max(0, (updated.notContacted ?? 0) - 1);
+        } else if (remarkModal.status === "pending") {
+          updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
+        }
+        updated.live = (updated.live ?? 0) + 1;
+        return updated;
+      });
     }
 
     try {
@@ -724,6 +944,64 @@ export default function DashboardPage() {
     }
   };
 
+  const handleAssignedConsultantUpdate = async (lead: Lead, value: string) => {
+    const prevLeads = [...leads];
+    startUpdating();
+    activeFetchIdRef.current++;
+    prefetchCache.current = {};
+
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, assignedConsultant: value } : l));
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedConsultant: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(`Failed to update consultant: ${data.details || data.error || 'Unknown error'}`, "error");
+        setLeads(prevLeads);
+      } else if (data.lead) {
+        setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, ...data.lead } : l));
+      }
+    } catch (err: any) {
+      showToast(`Failed to update consultant: ${err.message || 'Network error'}`, "error");
+      setLeads(prevLeads);
+    } finally {
+      stopUpdating();
+    }
+  };
+
+  const handleTestDriveUpdate = async (lead: Lead, value: string) => {
+    const prevLeads = [...leads];
+    startUpdating();
+    activeFetchIdRef.current++;
+    prefetchCache.current = {};
+
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, testDrive: value } : l));
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ testDrive: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(`Failed to update test drive: ${data.details || data.error || 'Unknown error'}`, "error");
+        setLeads(prevLeads);
+      } else if (data.lead) {
+        setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, ...data.lead } : l));
+      }
+    } catch (err: any) {
+      showToast(`Failed to update test drive: ${err.message || 'Network error'}`, "error");
+      setLeads(prevLeads);
+    } finally {
+      stopUpdating();
+    }
+  };
+
   const handleDeleteLead = async () => {
     if (!deleteModal) return;
     setDeleteLoading(true);
@@ -737,10 +1015,11 @@ export default function DashboardPage() {
 
     // Optimistically remove lead from state
     setLeads(prev => prev.filter(l => l.id !== targetLead.id));
-    const targetStatus = (targetLead.status === 'created' ? 'pending' : targetLead.status === 'closed_successful' ? 'live' : targetLead.status === 'closed_unsuccessful' ? 'lost' : targetLead.status) as 'pending' | 'live' | 'lost';
+    const targetStatus = (targetLead.status === 'created' ? 'not_contacted' : targetLead.status === 'closed_successful' ? 'live' : targetLead.status === 'closed_unsuccessful' ? 'lost' : targetLead.status) as 'not_contacted' | 'pending' | 'live' | 'lost';
 
     setStats(prev => {
       const updated = { ...prev, total: Math.max(0, (prev.total ?? 0) - 1) };
+      if (targetStatus === 'not_contacted') updated.notContacted = Math.max(0, (updated.notContacted ?? 0) - 1);
       if (targetStatus === 'pending') updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
       if (targetStatus === 'live') updated.live = Math.max(0, (updated.live ?? 0) - 1);
       if (targetStatus === 'lost') updated.lost = Math.max(0, (updated.lost ?? 0) - 1);
@@ -826,7 +1105,7 @@ export default function DashboardPage() {
             {exportLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Exporting...</> : "Export Excel"}
           </button>
           {/* <button className="btn btn-ghost" onClick={handleExportPDF} disabled={exportLoading}>
-            {exportLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Exporting...</> : "Export PDF"}
+            {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export PDF"}
           </button> */}
 
           <button className="btn btn-primary" onClick={handleSync} disabled={syncing}>
@@ -840,18 +1119,51 @@ export default function DashboardPage() {
               </>
             )}
           </button>
+
+          {(allowExternalUpload || userRole === "ADMIN" || userRole === "SUPERADMIN" || isSuperAdmin) && (
+            <button className="btn btn-secondary" onClick={() => setExternalSyncModalOpen(true)} disabled={syncing}>
+              Upload External Leads
+            </button>
+          )}
+
         </div>
       </div>
 
       {/* Stats */}
       {(() => {
-        const isFiltered = mounted && Boolean(search || statusFilter || branchFilter || startDate || endDate);
+        const isFiltered = mounted && Boolean(search || statusFilter || branchFilter || consultantFilter || testDriveFilter || startDate || endDate);
         return (
+
           <div className="stats-grid">
             <div className="stat-card">
               <div className="stat-label">Total Leads</div>
               <div className="stat-value" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{stats.total}</span>
+                {isFiltered && (
+                  <span
+                    title="Filtered count active"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "3px 6px",
+                      borderRadius: "6px",
+                      background: "rgba(59, 130, 246, 0.12)",
+                      color: "#3b82f6",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                    </svg>
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Not Contacted</div>
+              <div className="stat-value" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span>{stats.notContacted ?? 0}</span>
                 {isFiltered && (
                   <span
                     title="Filtered count active"
@@ -874,7 +1186,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Pending Leads</div>
+              <div className="stat-label">Contacted</div>
               <div className="stat-value open" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{stats.pending ?? stats.open ?? 0}</span>
                 {isFiltered && (
@@ -899,7 +1211,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Live Leads</div>
+              <div className="stat-label">Completed</div>
               <div className="stat-value success" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{stats.live ?? stats.closedSuccessful ?? 0}</span>
                 {isFiltered && (
@@ -924,7 +1236,7 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="stat-card">
-              <div className="stat-label">Lost Leads</div>
+              <div className="stat-label">Lost</div>
               <div className="stat-value fail" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{stats.lost ?? stats.closedUnsuccessful ?? 0}</span>
                 {isFiltered && (
@@ -952,6 +1264,7 @@ export default function DashboardPage() {
         );
       })()}
 
+
       {/* Filters */}
       <div className="filter-bar">
         <input
@@ -965,11 +1278,29 @@ export default function DashboardPage() {
           onChange={(e) => { setStatusFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
         >
           <option value="">All Statuses</option>
-          <option value="pending">Pending Leads</option>
-          <option value="live">Live Leads</option>
-          <option value="lost">Lost Leads</option>
+          <option value="not_contacted">Not Contacted</option>
+          <option value="pending">Contacted</option>
+          <option value="live">Completed</option>
+          <option value="lost">Lost</option>
         </select>
-        {userRole !== "ADMIN" && userAssignedBranch ? (
+        {userRole === "ADMIN" || userRole === "SUPERADMIN" ? (
+          <div>
+            <BranchConsultantPicker
+              branches={branches}
+              consultants={consultantsList}
+              selectedBranch={branchFilter}
+              selectedConsultant={consultantFilter}
+              onChange={({ branch, consultant }) => {
+                setBranchFilter(branch);
+                setConsultantFilter(consultant);
+                setPagination(p => ({ ...p, page: 1 }));
+              }}
+              placeholder="All Branches & Consultants"
+              showUnassigned={true}
+            />
+          </div>
+        ) : userAssignedBranch ? (
+
           <div
             style={{
               display: "inline-flex",
@@ -984,7 +1315,7 @@ export default function DashboardPage() {
             }}
             title="Branch restricted by Admin"
           >
-            🔒 <span>Branch: <strong style={{ textTransform: "capitalize", color: "var(--text-primary)" }}>{userAssignedBranch.replace(/_/g, " ")}</strong></span>
+            <span>Branch: <strong style={{ textTransform: "capitalize", color: "var(--text-primary)" }}>{(userAssignedBranch || "").replace(/_/g, " ")}</strong></span>
           </div>
         ) : (
           <select
@@ -998,12 +1329,41 @@ export default function DashboardPage() {
           </select>
         )}
         <select
-          value={primaryOrder}
-          onChange={(e) => { setPrimaryOrder(e.target.value as "desc" | "asc"); setPagination(p => ({ ...p, page: 1 })); }}
-          title="Sort by time"
+          value={testDriveFilter}
+          onChange={(e) => { setTestDriveFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+          style={{
+            borderColor: testDriveFilter === "Yes" ? "var(--primary)" : undefined,
+            fontWeight: testDriveFilter ? 600 : 400,
+          }}
         >
-          <option value="desc">Newest First</option>
-          <option value="asc">Oldest First</option>
+          <option value="">All Test Drives</option>
+          <option value="Yes">Yes</option>
+          <option value="No">No</option>
+          <option value="Not Scheduled">Not Scheduled</option>
+        </select>
+
+        {/* Source / Uploader Filter */}
+        <select
+          value={uploaderFilter}
+          onChange={(e) => { setUploaderFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+          style={{
+            borderColor: uploaderFilter ? "var(--primary)" : undefined,
+            fontWeight: uploaderFilter ? 600 : 400,
+          }}
+          title="Filter by Lead Source or Uploader"
+        >
+          <option value="">All Sources & Uploaders</option>
+          <option value="system">📊 Google Sheet (Sync)</option>
+          <option value="external">📤 All External Uploads</option>
+          {usersList.length > 0 && (
+            <optgroup label="Uploaded By User">
+              {usersList.map((u) => (
+                <option key={u.id} value={`user:${u.username}`}>
+                  👤 Uploaded by: {u.username}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
 
         {/* Today Lead Button */}
@@ -1042,14 +1402,23 @@ export default function DashboardPage() {
         </button>
 
         {/* Clear Date Filter Chip */}
-        {(startDate || endDate) && (
+        {(search || statusFilter || branchFilter || consultantFilter || testDriveFilter || uploaderFilter || startDate || endDate) && (
           <button
             className="btn btn-ghost"
-            onClick={() => { setStartDate(""); setEndDate(""); setPagination(p => ({ ...p, page: 1 })); }}
-            title="Clear date filter"
+            onClick={() => {
+              setSearch("");
+              setStatusFilter("");
+              setBranchFilter("");
+              setConsultantFilter("");
+              setTestDriveFilter("");
+              setUploaderFilter("");
+              setStartDate("");
+              setEndDate("");
+              setPagination(p => ({ ...p, page: 1 }));
+            }}
             style={{ padding: "6px 12px", fontSize: 13, background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", borderColor: "rgba(239, 68, 68, 0.2)" }}
           >
-            ✕ Clear Date
+            ✕ Clear Filters
           </button>
         )}
       </div>
@@ -1073,30 +1442,33 @@ export default function DashboardPage() {
             <table>
               <thead>
                 <tr>
-                  <th onClick={() => handleHeaderClick("name")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "180px" }} title="Click to sort by Name">
+                  <th onClick={() => handleHeaderClick("name")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Name">
                     Name {secondaryField === "name" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th style={{ minWidth: "165px", maxWidth: "190px" }}>Phone</th>
-                  <th onClick={() => handleHeaderClick("city")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "155px" }} title="Click to sort by City">
+                  <th>Phone</th>
+                  <th onClick={() => handleHeaderClick("city")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by City">
                     City {secondaryField === "city" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("adname")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "195px" }} title="Click to sort by Ad Name">
+                  <th onClick={() => handleHeaderClick("adname")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Ad Name">
                     Ad Name {secondaryField === "adname" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("branch")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "185px" }} title="Click to sort by Branch">
+                  <th onClick={() => handleHeaderClick("branch")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Branch">
                     Branch {secondaryField === "branch" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("followUpDate1")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "190px" }} title="Click to sort by Follow Up">
+                  <th onClick={() => handleHeaderClick("followUpDate1")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Follow Up">
                     Follow Up {secondaryField === "followUpDate1" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th onClick={() => handleHeaderClick("createdAt")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "180px" }} title="Click to sort by Created At">
+                  <th onClick={() => handleHeaderClick("createdAt")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Created At">
                     Created At {primaryOrder === "desc" ? "↓" : "↑"}
                   </th>
-                  <th onClick={() => handleHeaderClick("status")} style={{ cursor: "pointer", userSelect: "none", maxWidth: "165px" }} title="Click to sort by Status">
+                  <th onClick={() => handleHeaderClick("status")} style={{ cursor: "pointer", userSelect: "none" }} title="Click to sort by Status">
                     Status {secondaryField === "status" ? (secondaryOrder === "asc" ? "↑" : "↓") : ""}
                   </th>
-                  <th style={{ maxWidth: "220px" }}>Remark</th>
-                  <th style={{ maxWidth: "145px" }}>Actions</th>
+                  <th>Test Drive</th>
+                  <th>Assigned To</th>
+                  <th>Platform</th>
+                  <th>Remark</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1109,20 +1481,20 @@ export default function DashboardPage() {
                 ) : (
                   displayedLeads.map((lead: Lead) => (
                     <tr key={lead.id}>
-                      <td style={{ fontWeight: 600, maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.name}>{lead.name}</td>
-                      <td style={{ fontFamily: "monospace", fontSize: 13, minWidth: "165px", maxWidth: "190px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={parsePhoneNumber(lead.phone)}>{parsePhoneNumber(lead.phone)}</td>
-                      <td style={{ maxWidth: "155px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.city || "—"}>{lead.city || "—"}</td>
-                      <td style={{ maxWidth: "195px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.adname || "—"}>{lead.adname || "—"}</td>
-                      <td style={{ maxWidth: "185px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.branch ? parseBranches(lead.branch).join(", ") : "—"}>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", overflow: "hidden" }}>
+                      <td style={{ fontWeight: 600 }}>{lead.name}</td>
+                      <td style={{ fontFamily: "monospace" }}>{parsePhoneNumber(lead.phone)}</td>
+                      <td>{lead.city || "—"}</td>
+                      <td>{lead.adname || "—"}</td>
+                      <td>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "max-content", maxWidth: "100%" }}>
                           {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
-                            <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
+                            <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap", display: "inline-block" }}>
                               {b}
                             </span>
                           )) : "—"}
                         </div>
                       </td>
-                      <td style={{ maxWidth: "190px" }} title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'None'}, Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'None'}`}>
+                      <td>
                         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
@@ -1148,50 +1520,105 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </td>
-                      <td
-                        style={{ maxWidth: "180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, cursor: "pointer" }}
-                        title={getFullDateTooltip(lead.createdAt)}
-                      >
+                      <td style={{ cursor: "pointer" }} title={getFullDateTooltip(lead.createdAt)}>
                         {formatDate(lead.createdAt)}
                       </td>
-                      <td style={{ maxWidth: "165px" }}>
+                      <td>
                         <select
-                          className={`status-select ${(lead.status === "pending" || lead.status === "created") ? "status-pending" :
+                          className={`status-select ${(lead.status === "not_contacted" || lead.status === "created") ? "status-not_contacted" :
+                            lead.status === "pending" ? "status-pending" :
                               (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
                             }`}
-                          value={lead.status === 'created' ? 'pending' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
+                          value={lead.status === 'created' ? 'not_contacted' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
                           onChange={(e) => handleStatusChange(lead, e.target.value)}
                           title={`Status: ${formatStatusLabel(lead.status)}`}
                         >
-                          <option value="pending">Pending Lead</option>
-                          <option value="live">Live Lead</option>
-                          <option value="lost">Lost Lead</option>
+                          <option value="not_contacted">Not Contacted</option>
+                          <option value="pending">Contacted</option>
+                          <option value="live">Completed</option>
+                          <option value="lost">Lost</option>
                         </select>
                       </td>
-                      <td className="remark-cell" style={{ maxWidth: "220px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td>
+                        <select
+                          className="status-select"
+                          style={{ padding: "4px" }}
+                          value={lead.testDrive || "Not Scheduled"}
+                          onChange={(e) => handleTestDriveUpdate(lead, e.target.value)}
+                        >
+                          <option value="Not Scheduled">Not Scheduled</option>
+                          <option value="Yes">Yes</option>
+                          <option value="No">No</option>
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          className="status-select"
+                          style={{ padding: "4px" }}
+                          value={lead.assignedConsultant || ""}
+                          onChange={(e) => handleAssignedConsultantUpdate(lead, e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {getConsultantsForLead(lead).map((c) => (
+                            <option key={`${c.id}-${c.name}`} value={c.name}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        {(() => {
+                          let plat = lead.platform && !/^\d{4}-\d{2}-\d{2}$/.test(lead.platform) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(lead.platform)
+                            ? lead.platform.trim()
+                            : "Unknown";
+
+                          if (plat && plat.toLowerCase() !== "unknown") {
+                            plat = plat.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                          } else if (plat.toLowerCase() === "unknown") {
+                            plat = "Unknown";
+                          }
+
+                          const uploader = lead.uploadedBy?.username;
+
+                          return (
+                            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
+                              <span>{plat}</span>
+                              {uploader && (
+                                <span style={{ color: "var(--text-muted)", marginLeft: 5, fontSize: 12, fontWeight: 600 }}>
+                                  ({uploader})
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="remark-cell">
                         {lead.remark ? (
-                          <span className="remark-text" title={lead.remark}>{lead.remark}</span>
+                          <span className="remark-text" title={lead.remark} style={{ whiteSpace: "normal", wordBreak: "break-word", display: "block", maxWidth: "250px" }}>{lead.remark}</span>
                         ) : (
-                          <span style={{ color: "var(--text-muted)", fontSize: 13 }}>—</span>
+                          <span style={{ color: "var(--text-muted)" }}>—</span>
                         )}
                       </td>
-                      <td style={{ maxWidth: "145px" }}>
+                      <td>
                         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                           <button className="add-remark-btn" onClick={() => openRemarkModal(lead)}>
                             {lead.remark ? "Edit" : "Add"} Remark
                           </button>
-                          <button
-                            className="btn btn-ghost"
-                            style={{ color: "#ef4444", padding: "6px 8px", borderRadius: 6 }}
-                            onClick={() => openDeleteModal(lead)}
-                            title="Delete lead"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15, display: "block" }}>
-                              <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                            </svg>
-                          </button>
+                          {isSuperAdmin && (
+                            <button
+                              className="btn btn-ghost"
+                              style={{ color: "#ef4444", padding: "6px 8px", borderRadius: 6 }}
+                              onClick={() => openDeleteModal(lead)}
+                              title="Delete lead (Superadmin only)"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15, display: "block" }}>
+                                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       </td>
+
                     </tr>
                   ))
                 )}
@@ -1227,7 +1654,13 @@ export default function DashboardPage() {
             <h2>{remarkModal.remark ? "Edit" : "Add"} Remark</h2>
             <p>
               For <strong>{remarkModal.name}</strong> ({parsePhoneNumber(remarkModal.phone)})
-              {(remarkModal.status === "pending" || remarkModal.status === "created") && <><br /><small style={{ color: "var(--status-created)" }}>Adding a remark will automatically change status to Live Lead</small></>}
+              {remarkModal.uploadedBy?.username && (
+                <span style={{ display: "block", fontSize: 12, color: "#2563eb", marginTop: 4 }}>
+                  👤 Uploaded by: <strong>{remarkModal.uploadedBy.username}</strong>
+                  {remarkModal.uploadedAt && ` (${new Date(remarkModal.uploadedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})`}
+                </span>
+              )}
+              {(remarkModal.status === "pending" || remarkModal.status === "not_contacted" || remarkModal.status === "created") && <><br /><small style={{ color: "var(--status-created)" }}>Adding a remark will automatically change status to Completed</small></>}
             </p>
             <textarea
               value={remarkText}
@@ -1237,7 +1670,7 @@ export default function DashboardPage() {
             />
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setRemarkModal(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={handleAddRemark} disabled={remarkLoading || !remarkText.trim()}>
+              <button className="btn btn-primary" onClick={handleAddRemark} disabled={remarkLoading}>
                 {remarkLoading ? <><span className="spinner" /> Saving...</> : "Save Remark"}
               </button>
             </div>
@@ -1245,44 +1678,38 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Delete Modal */}
-      {deleteModal && (
+      {/* Delete Modal (Superadmin only) */}
+      {deleteModal && isSuperAdmin && (
         <div className="modal-overlay" onClick={() => setDeleteModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2 style={{ color: "#ef4444" }}>
-              {userRole === "ADMIN" ? "Delete Lead Permanently" : "Hide Lead"}
+              Delete Lead Permanently
             </h2>
             <p>
-              {userRole === "ADMIN" ? (
-                <>Are you sure you want to permanently delete lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})?</>
-              ) : (
-                <>Are you sure you want to hide lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})? It will be removed from your view while remaining in the database for Administrators.</>
-              )}
+              Are you sure you want to permanently delete lead for <strong>{deleteModal.name}</strong> ({parsePhoneNumber(deleteModal.phone)})?
             </p>
 
-            {userRole === "ADMIN" && (
-              <div style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="deleteOption"
-                    checked={!deleteFromSheet}
-                    onChange={() => setDeleteFromSheet(false)}
-                  />
-                  <span><strong>Delete from DB only</strong> (Keep row in Google Sheet)</span>
-                </label>
+            <div style={{ margin: "16px 0", display: "flex", flexDirection: "column", gap: 12, textAlign: "left" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="deleteOption"
+                  checked={!deleteFromSheet}
+                  onChange={() => setDeleteFromSheet(false)}
+                />
+                <span><strong>Delete from DB only</strong> (Keep row in Google Sheet)</span>
+              </label>
 
-                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    name="deleteOption"
-                    checked={deleteFromSheet}
-                    onChange={() => setDeleteFromSheet(true)}
-                  />
-                  <span><strong>Delete from DB & Google Sheet</strong> (Clear row from Google Sheet)</span>
-                </label>
-              </div>
-            )}
+              <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                <input
+                  type="radio"
+                  name="deleteOption"
+                  checked={deleteFromSheet}
+                  onChange={() => setDeleteFromSheet(true)}
+                />
+                <span><strong>Delete from DB & Google Sheet</strong> (Clear row from Google Sheet)</span>
+              </label>
+            </div>
 
             <div className="modal-actions" style={{ marginTop: 20 }}>
               <button className="btn btn-ghost" onClick={() => setDeleteModal(null)}>Cancel</button>
@@ -1293,15 +1720,16 @@ export default function DashboardPage() {
                 disabled={deleteLoading}
               >
                 {deleteLoading ? (
-                  <><span className="spinner" /> {userRole === "ADMIN" ? "Deleting..." : "Hiding..."}</>
+                  <><span className="spinner" /> Deleting...</>
                 ) : (
-                  userRole === "ADMIN" ? "Confirm Delete" : "Hide Lead"
+                  "Confirm Delete"
                 )}
               </button>
             </div>
           </div>
         </div>
       )}
+
 
       {/* Date Filter Modal */}
       {dateModalOpen && (
@@ -1425,6 +1853,17 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* External Upload Modal */}
+      <ExternalUploadModal
+        isOpen={externalSyncModalOpen}
+        onClose={() => setExternalSyncModalOpen(false)}
+        onSuccess={(msg) => {
+          showToast(msg);
+          fetchLeads(true);
+        }}
+      />
+
 
       {/* Toast */}
       {toast && <div className={`toast ${toast.type}`}>{toast.message}</div>}

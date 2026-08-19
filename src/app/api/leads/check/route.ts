@@ -24,20 +24,26 @@ export async function GET() {
         });
     }
 
-    // Single ultra-fast raw query returning count & max updatedAt (< 50 bytes data transfer)
-    const result = await prisma.$queryRaw<{ count: number; lastUpdated: Date | null }[]>`
-      SELECT COUNT(*)::int as count, MAX("updatedAt") as "lastUpdated" FROM "Lead"
-    `;
+    const aggregate = await prisma.lead.aggregate({
+      _count: true,
+      _max: {
+        updatedAt: true,
+      },
+    });
 
-    const count = result[0]?.count || 0;
-    const lastUpdated = result[0]?.lastUpdated || null;
+    const count = aggregate._count || 0;
+    const lastUpdated = aggregate._max.updatedAt || null;
 
     return NextResponse.json({
       count,
       lastUpdated,
     });
-  } catch (error) {
-    console.error('Leads check error:', error);
-    return NextResponse.json({ error: 'Failed to check leads' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Leads check warning (transient network/DB error):', error?.message || error);
+    return NextResponse.json({
+      count: 0,
+      lastUpdated: null,
+      warning: 'Database temporarily unavailable',
+    });
   }
 }

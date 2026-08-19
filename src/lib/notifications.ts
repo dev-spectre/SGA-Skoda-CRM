@@ -99,13 +99,13 @@ export async function checkAndNotify() {
 
     // 2. Query counts and single lead details efficiently
     const followUpWhere = {
-      status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
+      status: { notIn: ['closed', 'sold', 'lost', 'completed', 'live', 'closed_successful', 'closed_unsuccessful'] },
       OR: [
         { followUpDate1: { lte: endOfToday } },
         { followUpDate2: { lte: endOfToday } },
       ],
     };
-    const unclosedWhere = { status: { in: ['pending', 'created'] } };
+    const unclosedWhere = { status: { in: ['not_contacted', 'pending', 'created'] } };
 
     const [pendingFollowUpsCount, firstPendingLead, unclosedCount, firstUnclosedLead] = await Promise.all([
       prisma.lead.count({ where: followUpWhere }),
@@ -233,13 +233,13 @@ export async function processGradualNotifications() {
 
     // 2. Query counts and single lead details efficiently
     const followUpWhere = {
-      status: { notIn: ['closed', 'sold', 'lost', 'completed'] },
+      status: { notIn: ['closed', 'sold', 'lost', 'completed', 'live', 'closed_successful', 'closed_unsuccessful'] },
       OR: [
         { followUpDate1: { lte: endOfToday } },
         { followUpDate2: { lte: endOfToday } },
       ],
     };
-    const unclosedWhere = { status: { in: ['pending', 'created'] } };
+    const unclosedWhere = { status: { in: ['not_contacted', 'pending', 'created'] } };
 
     const [pendingFollowUpsCount, firstPendingLead, unclosedCount, firstUnclosedLead] = await Promise.all([
       prisma.lead.count({ where: followUpWhere }),
@@ -334,9 +334,5 @@ export async function processGradualNotifications() {
   }
 }
 
-// Auto-start background server loop ONLY on traditional long-running Node servers (not Vercel serverless)
-if (typeof window === 'undefined' && !process.env.VERCEL) {
-  setTimeout(() => {
-    restartNotificationLoop().catch(console.error);
-  }, 2000);
-}
+// Background server loop is initialized cleanly via instrumentation.ts
+

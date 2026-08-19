@@ -33,6 +33,7 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
+  const [accessRestricted, setAccessRestricted] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 
   const updateLeadInState = (id: number, updates: Partial<Lead>) => {
@@ -41,7 +42,7 @@ export default function CalendarPage() {
 
   const handleStatusChange = async (lead: Lead, newStatus: string) => {
     const oldStatus = lead.status;
-    const normOld = (oldStatus === 'created' ? 'pending' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus);
+    const normOld = (oldStatus === 'created' ? 'not_contacted' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus);
     if (newStatus === normOld) return;
 
     updateLeadInState(lead.id, { status: newStatus });
@@ -80,7 +81,9 @@ export default function CalendarPage() {
       try {
         const res = await fetch("/api/leads?limit=100000"); // Fetch all leads for now
         const data = await res.json();
-        if (res.ok) {
+        if (res.status === 403) {
+          setAccessRestricted(true);
+        } else if (res.ok) {
           setLeads(data.leads || []);
         }
       } catch (err) {
@@ -267,13 +270,14 @@ export default function CalendarPage() {
                           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
                             <div style={{ fontWeight: 700, fontSize: 18, color: "var(--text-primary)", letterSpacing: "-0.3px" }}>{lead.name}</div>
                             <select 
-                              value={['created', 'pending'].includes(lead.status) ? 'pending' : ['closed_successful', 'live'].includes(lead.status) ? 'live' : 'lost'} 
+                              value={lead.status === 'created' ? 'not_contacted' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status} 
                               onChange={(e) => handleStatusChange(lead, e.target.value)}
-                              className={`status-select ${['created', 'pending'].includes(lead.status) ? 'pending' : ['closed_successful', 'live'].includes(lead.status) ? 'live' : 'lost'}`}
+                              className={`status-select status-${(lead.status === 'not_contacted' || lead.status === 'created') ? 'not_contacted' : lead.status === 'pending' ? 'pending' : (lead.status === 'live' || lead.status === 'closed_successful') ? 'live' : 'lost'}`}
                               style={{ padding: "4px 12px", fontSize: "12px", borderRadius: "16px", cursor: "pointer" }}
                             >
-                              <option value="pending">Pending</option>
-                              <option value="live">Live</option>
+                              <option value="not_contacted">Not Contacted</option>
+                              <option value="pending">Contacted</option>
+                              <option value="live">Completed</option>
                               <option value="lost">Lost</option>
                             </select>
                           </div>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { NotificationInit } from "@/components/NotificationInit";
+import { ImpersonationBanner } from "@/components/ImpersonationBanner";
 
 export const metadata: Metadata = {
   title: "SGA Skoda CRM",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
+        <ImpersonationBanner />
         <div className="app-layout">
           <Sidebar />
           <main className="main-content">{children}</main>
@@ -21,3 +23,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+

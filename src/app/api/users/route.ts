@@ -6,13 +6,34 @@ import { hashPassword } from '@/lib/passwords';
 export async function GET() {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    if (!isAdmin) {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 403 });
     }
 
-    const users: any[] = await prisma.$queryRawUnsafe(
-      `SELECT "id", "username", "role", "assignedBranch", "createdAt", "updatedAt" FROM "User" ORDER BY "createdAt" DESC`
-    );
+    const superUsername = (process.env.SUPERADMIN_USERNAME || 'sudo').toLowerCase();
+
+    const users = await prisma.user.findMany({
+      where: {
+        username: {
+          notIn: [superUsername, 'sudo'],
+          mode: 'insensitive',
+        },
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        assignedBranch: true,
+        assignedPlatform: true,
+        allowExternalUpload: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
 
     return NextResponse.json({ users });
   } catch (error) {
@@ -24,43 +45,61 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    if (!isAdmin) {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 403 });
     }
 
     const body = await request.json();
-    const { username, password, role, assignedBranch } = body;
+    const { username, password, role, assignedBranch, assignedPlatform, allowExternalUpload } = body;
 
     if (!username || !password) {
       return NextResponse.json({ error: 'Username and password are required' }, { status: 400 });
     }
 
-    const existingUsers: any[] = await prisma.$queryRawUnsafe(
-      `SELECT "id" FROM "User" WHERE "username" = $1 LIMIT 1`,
-      username.trim()
-    );
+    const trimmedUsername = username.trim();
+    const superUsername = (process.env.SUPERADMIN_USERNAME || 'sudo').toLowerCase();
+    if (trimmedUsername.toLowerCase() === superUsername || trimmedUsername.toLowerCase() === 'sudo') {
+      return NextResponse.json({ error: 'This username is reserved and cannot be created.' }, { status: 400 });
+    }
 
-    if (existingUsers.length > 0) {
+    const existingUser = await prisma.user.findUnique({
+      where: { username: trimmedUsername },
+    });
+
+    if (existingUser) {
       return NextResponse.json({ error: 'Username already exists' }, { status: 400 });
     }
 
     const assigned = assignedBranch ? assignedBranch.trim() : null;
+    const assignedPlat = assignedPlatform ? assignedPlatform.trim() : null;
     const userRole = role === 'ADMIN' ? 'ADMIN' : 'USER';
     const hashedPassword = hashPassword(password.trim());
 
-    const createdUsers: any[] = await prisma.$queryRawUnsafe(
-      `INSERT INTO "User" ("username", "password", "role", "assignedBranch", "createdAt", "updatedAt") 
-       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) 
-       RETURNING "id", "username", "role", "assignedBranch", "createdAt"`,
-      username.trim(),
-      hashedPassword,
-      userRole,
-      assigned
-    );
+    const user = await prisma.user.create({
+      data: {
+        username: trimmedUsername,
+        password: hashedPassword,
+        role: userRole,
+        assignedBranch: assigned,
+        assignedPlatform: assignedPlat,
+        allowExternalUpload: Boolean(allowExternalUpload),
+      },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        assignedBranch: true,
+        assignedPlatform: true,
+        allowExternalUpload: true,
+        createdAt: true,
+      },
+    });
 
-    return NextResponse.json({ user: createdUsers[0] }, { status: 201 });
+    return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
     console.error('Error creating user:', error);
     return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
   }
 }
+

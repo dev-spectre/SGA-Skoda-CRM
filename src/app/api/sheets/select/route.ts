@@ -6,12 +6,14 @@ import { getCurrentUser } from '@/lib/auth';
 export async function POST(request: NextRequest) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    if (!isAdmin) {
       return NextResponse.json(
         { error: 'Unauthorized. Only Administrators can select spreadsheet.' },
         { status: 403 }
       );
     }
+
 
     const body = await request.json();
     const { spreadsheetId, spreadsheetName, sheetName } = body;
@@ -28,8 +30,13 @@ export async function POST(request: NextRequest) {
       currentSettings && 
       (currentSettings.selectedSpreadsheetId !== spreadsheetId || currentSettings.selectedSheetName !== sheetName)
     ) {
-      // Clear entire database cache because sheet is single source of truth
-      await prisma.lead.deleteMany({});
+      // Clear database cache only for previous sheet's leads, preserving external uploads
+      await prisma.lead.deleteMany({
+        where: {
+          source: { not: 'External Upload' },
+          uploadedById: null,
+        },
+      });
     }
     
     await prisma.settings.upsert({

@@ -18,10 +18,17 @@ model Lead {
   followUpDate1 DateTime?
   followUpDate2 DateTime?
   remark        String?
-  status    String   @default("created")
+  status    String   @default("not_contacted")
   sheetRow  Int?
   sheetId   String?
   fingerprint String?   @unique
+  assignedConsultant String?
+  testDrive String?
+  platform  String?
+  source    String   @default("System")
+  uploadedById Int?
+  uploadedBy   User?   @relation(name: "UserUploadedLeads", fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedAt DateTime?
 
   notifiedAt DateTime?
   createdAt  DateTime  @default(now())
@@ -42,10 +49,13 @@ model User {
   password       String
   role           String       @default("USER") // "ADMIN" or "USER"
   assignedBranch String?      // Optional branch assignment, e.g., "coimbatore" or null for all branches
+  assignedPlatform String?    // Optional platform assignment, e.g., "Meta" or null
+  allowExternalUpload Boolean  @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   hiddenLeads    HiddenLead[]
+  uploadedLeads  Lead[]        @relation(name: "UserUploadedLeads")
 }
 
 model HiddenLead {
@@ -88,3 +98,15 @@ model PushSubscription {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }
+
+model Consultant {
+  id        Int      @id @default(autoincrement())
+  name      String
+  branch    String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([name, branch])
+  @@index([branch])
+}
+

@@ -12,6 +12,7 @@ export interface ColumnMapping {
   createdAt: number;
   remark: number;
   status: number;
+  platform: number;
 }
 
 export async function computeIntelligentMapping(
@@ -34,6 +35,7 @@ export async function computeIntelligentMapping(
     }
   }
 
+  const dataRows = rows.slice(1, 10);
   const mapping: Partial<Record<keyof ColumnMapping, number>> = {};
 
   const regexMap: Record<keyof ColumnMapping, RegExp[]> = {
@@ -43,6 +45,7 @@ export async function computeIntelligentMapping(
     city: [/^city$/i, /^location$/i, /city|location|town/i],
     adname: [/^ad\s?_?name$/i, /^campaign\s?_?name$/i, /ad\s?name|campaign\s?name/i],
     branch: [/^branch$/i, /^office$/i, /branch|office/i],
+    platform: [/^platform$/i, /^source\s?_?platform$/i, /^lead\s?_?platform$/i, /^source$/i, /^publisher$/i, /^channel$/i, /platform|source|publisher|channel|meta|facebook|ig|instagram|google/i],
     followUpDate1: [/^follow\s?up\s?date\s?1$/i, /^follow\s?up\s?1$/i, /follow up 1|date 1/i],
     followUpDate2: [/^follow\s?up\s?date\s?2$/i, /^follow\s?up\s?2$/i, /follow up 2|date 2/i],
     createdAt: [/^created\s?_?at$/i, /^date$/i, /^timestamp$/i, /date|time|created/i],
@@ -62,6 +65,16 @@ export async function computeIntelligentMapping(
         if (key === 'name' && /ad_name|campaign_name|ad name|campaign name/i.test(headers[matchIndex])) {
           continue; // skip this match and keep trying
         }
+        if (key === 'platform') {
+          // Check if data rows in this column look like dates
+          const looksLikeDate = dataRows.some((row: unknown[]) => {
+            const val = String((row as unknown[])[matchIndex] || '').trim();
+            return val && !isNaN(Date.parse(val)) && (val.includes('-') || val.includes('/'));
+          });
+          if (looksLikeDate) {
+            continue; // Skip this column for platform mapping
+          }
+        }
         mapping[key] = matchIndex;
         break;
       }
@@ -69,8 +82,6 @@ export async function computeIntelligentMapping(
   }
 
   // Phase 2: Data Sniffing for missing core fields
-  const dataRows = rows.slice(1, 10);
-  
   if (mapping.phone === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
       if (Object.values(mapping).includes(c)) continue;
@@ -93,6 +104,35 @@ export async function computeIntelligentMapping(
     }
   }
 
+  if (mapping.platform === undefined) {
+    for (let c = 0; c <= maxColIndex; c++) {
+      if (Object.values(mapping).includes(c)) continue;
+      // Skip columns that contain date-like strings
+      const containsDates = dataRows.some((row: unknown[]) => {
+        const val = String((row as unknown[])[c] || '').trim();
+        return val && !isNaN(Date.parse(val)) && (val.includes('-') || val.includes('/'));
+      });
+      if (containsDates) continue;
+
+      const isPlatform = dataRows.some((row: unknown[]) => {
+        const val = String((row as unknown[])[c] || '').trim().toLowerCase();
+        return (
+          val.includes('meta') ||
+          val.includes('facebook') ||
+          val.includes('instagram') ||
+          val.includes('google') ||
+          val.includes('whatsapp') ||
+          val.includes('website') ||
+          val.includes('chatbot') ||
+          val === 'fb' ||
+          val === 'ig' ||
+          val.includes('ads')
+        );
+      });
+      if (isPlatform) { mapping.platform = c; break; }
+    }
+  }
+
   // Phase 3: Fallbacks and free column assignment for remark/status
   const missingHeaders: { col: number; value: string }[] = [];
 
@@ -110,6 +150,7 @@ export async function computeIntelligentMapping(
   if (mapping.city === undefined) assignFreeColumn('city', 'City');
   if (mapping.adname === undefined) assignFreeColumn('adname', 'Ad Name');
   if (mapping.branch === undefined) assignFreeColumn('branch', 'Branch');
+  if (mapping.platform === undefined) assignFreeColumn('platform', 'Platform');
   if (mapping.followUpDate1 === undefined) assignFreeColumn('followUpDate1', 'Follow Up Date 1');
   if (mapping.followUpDate2 === undefined) assignFreeColumn('followUpDate2', 'Follow Up Date 2');
   if (mapping.createdAt === undefined) assignFreeColumn('createdAt', 'Created At');

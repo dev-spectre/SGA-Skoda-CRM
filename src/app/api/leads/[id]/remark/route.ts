@@ -12,7 +12,7 @@ export async function POST(
     const body = await request.json();
     const { remark } = body;
     
-    if (!remark || remark.trim() === '') {
+    if (remark === undefined) {
       return NextResponse.json({ error: 'Remark is required' }, { status: 400 });
     }
     
@@ -21,7 +21,7 @@ export async function POST(
       return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
     }
     
-    const newStatus = (lead.status === 'created' || lead.status === 'pending') ? 'live' : lead.status;
+    const newStatus = (lead.status === 'created' || lead.status === 'pending' || lead.status === 'not_contacted') ? 'live' : lead.status;
     
     const updatedLead = await prisma.lead.update({
       where: { id: leadId },
@@ -31,30 +31,32 @@ export async function POST(
       },
     });
     
-    // Non-blocking background writeback to Google Sheet
-    (async () => {
-      try {
-        const settings = await prisma.settings.findUnique({ where: { id: 1 } });
-        const spreadsheetId = lead.sheetId || settings?.selectedSpreadsheetId;
-        const sheetName = settings?.selectedSheetName;
+    // Non-blocking background writeback to Google Sheet (only for primary sheet leads, never external uploads)
+    if (lead.source !== 'External Upload' && lead.uploadedById === null) {
+      (async () => {
+        try {
+          const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+          const spreadsheetId = lead.sheetId || settings?.selectedSpreadsheetId;
+          const sheetName = settings?.selectedSheetName;
 
-        if (spreadsheetId && sheetName && settings?.googleAccessToken) {
-          const mapping = settings.columnMapping
-            ? JSON.parse(settings.columnMapping)
-            : { remark: 7, status: 8 };
-          
-          const updates: { col: number; value: string }[] = [];
-          if (mapping.remark !== undefined) updates.push({ col: mapping.remark, value: remark.trim() });
-          if (mapping.status !== undefined) updates.push({ col: mapping.status, value: newStatus });
+          if (spreadsheetId && sheetName && settings?.googleAccessToken) {
+            const mapping = settings.columnMapping
+              ? JSON.parse(settings.columnMapping)
+              : { remark: 7, status: 8 };
+            
+            const updates: { col: number; value: string }[] = [];
+            if (mapping.remark !== undefined) updates.push({ col: mapping.remark, value: remark.trim() });
+            if (mapping.status !== undefined) updates.push({ col: mapping.status, value: newStatus });
 
-          if (updates.length > 0) {
-            await findAndWriteToSheetRow(spreadsheetId, sheetName, lead, updates);
+            if (updates.length > 0) {
+              await findAndWriteToSheetRow(spreadsheetId, sheetName, lead, updates);
+            }
           }
+        } catch (sheetError) {
+          console.error('Failed to update Google Sheet remark in background:', sheetError);
         }
-      } catch (sheetError) {
-        console.error('Failed to update Google Sheet remark in background:', sheetError);
-      }
-    })();
+      })();
+    }
     
     return NextResponse.json({ lead: updatedLead });
   } catch (error) {
