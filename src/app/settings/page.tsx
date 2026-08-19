@@ -31,7 +31,6 @@ const CRM_SETTINGS_FIELDS = [
   { key: "name", label: "Customer Name", required: true, icon: "👤", hints: ["name", "full name", "client", "customer", "lead name", "prospect"] },
   { key: "phone", label: "Phone Number", required: true, icon: "📞", hints: ["phone", "mobile", "contact", "cell", "number", "tel"] },
   { key: "branch", label: "Branch", required: false, icon: "📍", hints: ["branch", "showroom", "outlet", "dealer", "location"] },
-  { key: "email", label: "Email Address", required: false, icon: "✉️", hints: ["email", "e-mail", "mail"] },
   { key: "city", label: "City / Location", required: false, icon: "🏙️", hints: ["city", "town", "place", "district", "address"] },
   { key: "platform", label: "Platform / Source", required: false, icon: "🌐", hints: ["platform", "source", "channel", "publisher", "medium"] },
   { key: "adname", label: "Campaign / Ad Name", required: false, icon: "📢", hints: ["ad", "campaign", "ad name", "adset", "creative", "utm"] },
@@ -52,7 +51,7 @@ function SettingsContent() {
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [selectedSpreadsheet, setSelectedSpreadsheet] = useState("");
   const [selectedSheet, setSelectedSheet] = useState("");
-  const [interval, setInterval_] = useState(5);
+  const [interval, setInterval_] = useState(15);
   const [bgNotificationsEnabled, setBgNotificationsEnabled] = useState(true);
   const [webPushEnabled, setWebPushEnabled] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -68,20 +67,27 @@ function SettingsContent() {
   const [mapping, setMapping] = useState<{ [key: string]: number }>({
     name: 0,
     phone: 1,
-    email: 2,
-    city: 3,
-    createdAt: 4,
-    remark: 5,
-    status: 6,
-    adname: 7,
-    branch: 8,
-    followUpDate1: 9,
-    followUpDate2: 10,
-    platform: 11,
+    city: 2,
+    createdAt: 3,
+    remark: 4,
+    status: 5,
+    adname: 6,
+    branch: 7,
+    followUpDate1: 8,
+    followUpDate2: 9,
+    platform: 10,
   });
 
   const [userRole, setUserRole] = useState<string>("USER");
-  const isAdmin = userRole === "ADMIN" || userRole === "SUPERADMIN";
+  const [isSuperAdmin, setIsSuperAdmin] = useState<boolean>(false);
+  const isAdmin = userRole === "ADMIN" || userRole === "SUPERADMIN" || isSuperAdmin;
+
+  // Webhook state (Superadmin only)
+  const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
+  const [showScriptDetails, setShowScriptDetails] = useState(false);
 
   // Duplicate leads state
   const [duplicateScanStats, setDuplicateScanStats] = useState<{
@@ -97,6 +103,110 @@ function SettingsContent() {
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const generateAppsScriptCode = (url: string) => `/**
+ * ==========================================================
+ *  SGA SKODA CRM — REAL-TIME GOOGLE SHEET WEBHOOK
+ * ==========================================================
+ * Automatically triggers instant data fetch of new leads
+ * directly into your SGA Skoda CRM when added to this sheet.
+ *
+ * SETUP GUIDE:
+ * 1. In Google Sheets: Click Extensions > Apps Script
+ * 2. Paste this entire code into 'Code.gs' and click Save (💾)
+ * 3. Click the Clock icon (Triggers) on the left sidebar
+ * 4. Click '+ Add Trigger' (bottom right) and select:
+ *    - Function: onSpreadsheetChange
+ *    - Event source: From spreadsheet
+ *    - Event type: On change (or On form submit)
+ * 5. Save and authorize permissions.
+ * ==========================================================
+ */
+
+var CRM_WEBHOOK_URL = "${url || "https://YOUR_DOMAIN/api/webhooks/sheets"}";
+
+function onSpreadsheetChange(e) {
+  try {
+    var payload = JSON.stringify({
+      event: "sheet_change",
+      changeType: e ? e.changeType : "edit",
+      timestamp: new Date().toISOString()
+    });
+
+    var options = {
+      method: "post",
+      contentType: "application/json",
+      payload: payload,
+      muteHttpExceptions: true
+    };
+
+    var response = UrlFetchApp.fetch(CRM_WEBHOOK_URL, options);
+    Logger.log("CRM Webhook response: " + response.getContentText());
+  } catch (err) {
+    Logger.log("CRM Webhook error: " + err.toString());
+  }
+}
+
+function onFormSubmit(e) {
+  try {
+    var payload = JSON.stringify({
+      event: "form_submit",
+      values: e ? e.values : null,
+      timestamp: new Date().toISOString()
+    });
+
+    var options = {
+      method: "post",
+      contentType: "application/json",
+      payload: payload,
+      muteHttpExceptions: true
+    };
+
+    var response = UrlFetchApp.fetch(CRM_WEBHOOK_URL, options);
+    Logger.log("CRM Form Submit Webhook response: " + response.getContentText());
+  } catch (err) {
+    Logger.log("CRM Form Submit Webhook error: " + err.toString());
+  }
+}
+`;
+
+  const handleCopyWebhook = () => {
+    if (!webhookUrl) return;
+    navigator.clipboard.writeText(webhookUrl);
+    setCopiedWebhook(true);
+    showToast("Webhook URL copied to clipboard!");
+    setTimeout(() => setCopiedWebhook(false), 2500);
+  };
+
+  const handleCopyScript = () => {
+    const code = generateAppsScriptCode(webhookUrl);
+    navigator.clipboard.writeText(code);
+    setCopiedScript(true);
+    showToast("Google Apps Script code copied to clipboard!");
+    setTimeout(() => setCopiedScript(false), 2500);
+  };
+
+  const handleTestWebhook = async () => {
+    setTestingWebhook(true);
+    try {
+      const res = await fetch("/api/webhooks/sheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event: "settings_test", timestamp: new Date().toISOString() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`⚡ Webhook success: ${data.message || 'Synced and active!'}`);
+        fetchSettings();
+      } else {
+        showToast(data.error || "Failed to trigger webhook", "error");
+      }
+    } catch {
+      showToast("Webhook test failed (network error)", "error");
+    } finally {
+      setTestingWebhook(false);
+    }
   };
 
   const handleScanDuplicates = async () => {
@@ -151,9 +261,21 @@ function SettingsContent() {
     fetch("/api/auth/me")
       .then((res) => res.json())
       .then((data) => {
-        if (data.user?.role) setUserRole(data.user.role);
+        if (data.user) {
+          if (data.user.role) setUserRole(data.user.role);
+          const isSuper = Boolean(
+            data.user.isSuperAdmin ||
+            data.user.role === "SUPERADMIN" ||
+            data.user.username === "sudo"
+          );
+          setIsSuperAdmin(isSuper);
+        }
       })
       .catch(() => {});
+
+    if (typeof window !== "undefined") {
+      setWebhookUrl(`${window.location.origin}/api/webhooks/sheets`);
+    }
 
     getWebPushSubscription().then((sub) => setWebPushEnabled(!!sub));
 
@@ -222,7 +344,7 @@ function SettingsContent() {
         setSettings(data.settings);
         setIsGoogleLinked(data.isGoogleLinked);
         setGoogleAccountEmail(data.googleAccountEmail || null);
-        setInterval_(data.settings.notificationInterval || 5);
+        setInterval_(data.settings.notificationInterval || 15);
         setBgNotificationsEnabled(data.settings.backgroundNotificationsEnabled ?? true);
         if (data.settings.selectedSpreadsheetId) {
           setSelectedSpreadsheet(data.settings.selectedSpreadsheetId);
@@ -587,6 +709,186 @@ function SettingsContent() {
         </div>
       )}
 
+      {/* Superadmin Real-Time Google Sheet Webhook */}
+      {isSuperAdmin && (
+        <div
+          className="settings-section"
+          style={{
+            border: "1.5px solid rgba(59, 130, 246, 0.35)",
+            background: "linear-gradient(180deg, rgba(59, 130, 246, 0.04) 0%, rgba(59, 130, 246, 0.01) 100%)",
+            borderRadius: "var(--radius)",
+            position: "relative",
+            overflow: "hidden",
+            boxShadow: "0 4px 20px rgba(59, 130, 246, 0.06)",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 24 }}>⚡</span>
+              <div>
+                <h2 style={{ margin: 0, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>Instant Sheet Webhook</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      padding: "3px 10px",
+                      borderRadius: 12,
+                      background: "rgba(59, 130, 246, 0.15)",
+                      color: "#2563eb",
+                      border: "1px solid rgba(59, 130, 246, 0.3)",
+                    }}
+                  >
+                    Superadmin
+                  </span>
+                </h2>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleTestWebhook}
+              disabled={testingWebhook}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600 }}
+            >
+              {testingWebhook ? (
+                <>
+                  <span className="spinner" /> Triggering Webhook...
+                </>
+              ) : (
+                <>
+                  <span>⚡</span> Test Webhook Sync
+                </>
+              )}
+            </button>
+          </div>
+
+          <p className="section-desc" style={{ marginBottom: 16 }}>
+            Paste this webhook into your Google Sheet&apos;s <strong>Google Apps Script</strong>. When a new lead row is added, it will trigger an instant data fetch in real time without waiting for background polling.
+          </p>
+
+          {/* Webhook URL Input & Copy */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+              Webhook Endpoint URL:
+            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                type="text"
+                readOnly
+                value={webhookUrl || (typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/sheets` : "/api/webhooks/sheets")}
+                style={{
+                  flex: 1,
+                  minWidth: 280,
+                  padding: "8px 12px",
+                  fontSize: 13,
+                  fontFamily: "monospace",
+                  background: "var(--bg-dark)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleCopyWebhook}
+                style={{ minWidth: 170, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontWeight: 600 }}
+              >
+                {copiedWebhook ? "✓ Copied Webhook URL!" : "📋 Copy Webhook URL"}
+              </button>
+            </div>
+          </div>
+
+          {/* Google Apps Script Code Accordion / Box */}
+          <div
+            style={{
+              background: "#0f172a",
+              border: "1px solid #1e293b",
+              borderRadius: 8,
+              padding: 16,
+              color: "#e2e8f0",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16 }}>📜</span>
+                <span style={{ fontWeight: 600, fontSize: 13, color: "#93c5fd" }}>Google Apps Script (Code.gs)</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowScriptDetails(!showScriptDetails)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#94a3b8",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    padding: "4px 8px",
+                  }}
+                >
+                  {showScriptDetails ? "Hide Instructions" : "Setup Instructions (60s)"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={handleCopyScript}
+                  style={{ fontSize: 12, padding: "4px 12px", fontWeight: 600 }}
+                >
+                  {copiedScript ? "✓ Copied Script Code!" : "📋 Copy Apps Script Code"}
+                </button>
+              </div>
+            </div>
+
+            {/* Step-by-step Setup instructions */}
+            {showScriptDetails && (
+              <div
+                style={{
+                  background: "rgba(30, 41, 59, 0.9)",
+                  borderRadius: 6,
+                  padding: "12px 16px",
+                  marginBottom: 12,
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  color: "#cbd5e1",
+                  borderLeft: "3px solid #3b82f6",
+                }}
+              >
+                <strong style={{ color: "#ffffff", display: "block", marginBottom: 4 }}>How to Install in 4 Simple Steps:</strong>
+                <ol style={{ margin: "0 0 0 18px", padding: 0 }}>
+                  <li>In your Google Sheet, click <strong>Extensions › Apps Script</strong> in the top menu bar.</li>
+                  <li>Replace any existing text in <code>Code.gs</code> by pasting the script code below, then click <strong>Save (💾)</strong>.</li>
+                  <li>In the left sidebar, click the <strong>Triggers (Alarm Clock ⏰)</strong> icon › click <strong>+ Add Trigger</strong> (bottom right).</li>
+                  <li>Choose: <em>Function:</em> <strong>onSpreadsheetChange</strong>, <em>Event source:</em> <strong>From spreadsheet</strong>, <em>Event type:</em> <strong>On change</strong> (or <strong>On form submit</strong>).</li>
+                  <li>Click <strong>Save</strong> and authorize Google permissions. New leads will now instantly ingest into CRM!</li>
+                </ol>
+              </div>
+            )}
+
+            <pre
+              style={{
+                margin: 0,
+                padding: "12px 14px",
+                background: "#020617",
+                borderRadius: 6,
+                fontSize: 12,
+                fontFamily: "monospace",
+                overflowX: "auto",
+                maxHeight: 220,
+                lineHeight: 1.4,
+                color: "#38bdf8",
+              }}
+            >
+              <code>{generateAppsScriptCode(webhookUrl)}</code>
+            </pre>
+          </div>
+        </div>
+      )}
+
       {/* Visual Column Mapping */}
       <div className="settings-section">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
@@ -801,10 +1103,12 @@ function SettingsContent() {
         </div>
       </div>
 
-      {/* Notifications */}
+      {/* Notifications & Polling Interval */}
       <div className="settings-section">
-        <h2>Web Push Notifications</h2>
-        <p className="section-desc">Receive OS desktop and mobile push notifications even when your browser is completely closed.</p>
+        <h2>Background Sheet Polling & Web Push Notifications</h2>
+        <p className="section-desc">
+          Configure safety-net background sheet sync frequency and browser/mobile push notifications for unclosed leads and follow-ups.
+        </p>
 
         <div className="settings-row" style={{ marginBottom: 16 }}>
           <div>
@@ -853,37 +1157,55 @@ function SettingsContent() {
           </button>
         </div>
 
-        {webPushEnabled && (
-          <div className="settings-row">
-            <div>
-              <label style={{ display: "block", fontWeight: 600 }}>Notification Check Interval (minutes)</label>
-              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                Set how frequently this device should be checked and notified for unclosed leads.
-              </span>
-            </div>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        {/* Polling & Notification Interval Control */}
+        <div className="settings-row">
+          <div>
+            <label style={{ display: "block", fontWeight: 600 }}>Background Sheet Polling Interval (minutes)</label>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+              Periodic safety-net sync frequency with Google Sheets (Recommended: 15–60 mins when Google Apps Script Webhook is active).
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {[15, 30, 60, 120].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`btn btn-sm ${interval === preset ? "btn-primary" : "btn-ghost"}`}
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                  onClick={() => setInterval_(preset)}
+                  disabled={!isAdmin}
+                >
+                  {preset}m
+                </button>
+              ))}
               <input
                 type="number"
                 min="1"
                 max="1440"
                 value={interval}
-                onChange={(e) => setInterval_(parseInt(e.target.value) || 5)}
-                style={{ width: 100 }}
+                onChange={(e) => setInterval_(parseInt(e.target.value) || 15)}
+                disabled={!isAdmin}
+                style={{ width: 75, padding: "4px 8px", fontSize: 13 }}
+                title="Custom interval in minutes"
               />
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>min</span>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={async () => {
                   await handleSaveInterval();
-                  await registerWebPushSubscription(interval);
-                  showToast(`Device notification interval updated to ${interval} minute(s)!`);
+                  if (webPushEnabled) {
+                    await registerWebPushSubscription(interval);
+                  }
+                  showToast(`Background polling interval updated to ${interval} minute(s)!`);
                 }}
-                disabled={saving}
+                disabled={!isAdmin || saving}
               >
-                Save Interval
+                {isAdmin ? "Save Interval" : "🔒 Admin Only"}
               </button>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Danger Zone - Admin Only */}

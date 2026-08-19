@@ -19,7 +19,6 @@ const CRM_FIELDS = [
   { key: "name", label: "Customer Name", required: true, icon: "👤", hints: ["name", "full name", "client", "customer", "lead name", "prospect"] },
   { key: "phone", label: "Phone Number", required: true, icon: "📞", hints: ["phone", "mobile", "contact", "cell", "number", "tel"] },
   { key: "branch", label: "Branch", required: false, icon: "📍", hints: ["branch", "showroom", "outlet", "dealer", "location"] },
-  { key: "email", label: "Email Address", required: false, icon: "✉️", hints: ["email", "e-mail", "mail"] },
   { key: "city", label: "City / Place", required: false, icon: "🏙️", hints: ["city", "town", "place", "district", "address"] },
   { key: "assignedConsultant", label: "Assigned Consultant", required: false, icon: "🧑‍💼", hints: ["consultant", "executive", "advisor", "rep", "sales rep", "assigned"] },
   { key: "status", label: "Lead Status", required: false, icon: "📊", hints: ["status", "stage", "lead status", "disposition"] },

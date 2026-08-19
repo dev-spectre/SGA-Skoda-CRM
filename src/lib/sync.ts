@@ -5,7 +5,6 @@ import { parsePhoneNumber, sanitizeField } from '@/lib/utils';
 interface ColumnMapping {
   name: number;
   phone: number;
-  email?: number;
   city: number;
   adname?: number;
   branch?: number;
@@ -20,24 +19,22 @@ interface ColumnMapping {
 const DEFAULT_MAPPING: ColumnMapping = {
   name: 0,
   phone: 1,
-  email: 2,
-  city: 3,
-  createdAt: 4,
-  remark: 5,
-  status: 6,
-  adname: 7,
-  branch: 8,
-  followUpDate1: 9,
-  followUpDate2: 10,
-  platform: 11,
+  city: 2,
+  createdAt: 3,
+  remark: 4,
+  status: 5,
+  adname: 6,
+  branch: 7,
+  followUpDate1: 8,
+  followUpDate2: 9,
+  platform: 10,
 };
 
-function isLowQualityLead(name: string, phone: string, email: string, city: string): boolean {
+function isLowQualityLead(name: string, phone: string, city: string): boolean {
   const hasName = name.trim().length > 0;
   const hasPhone = phone.trim().length > 0;
-  const hasEmail = email.trim().length > 0;
   const hasCity = city.trim().length > 0;
-  return !hasName && !hasPhone && !hasEmail && !hasCity;
+  return !hasName && !hasPhone && !hasCity;
 }
 
 export async function deduplicateDatabaseLeads() {
@@ -89,7 +86,6 @@ export async function performSheetSync() {
       status: true,
       name: true,
       phone: true,
-      email: true,
       city: true,
       adname: true,
       branch: true,
@@ -137,12 +133,10 @@ export async function performSheetSync() {
 
     const rawName = (row[mapping.name] || '').toString();
     const rawPhone = (row[mapping.phone] || '').toString();
-    const rawEmail = mapping.email !== undefined ? (row[mapping.email] || '').toString() : '';
     const rawCity = (row[mapping.city] || '').toString();
 
     const name = sanitizeField(rawName);
     const phone = parsePhoneNumber(rawPhone);
-    const email = sanitizeField(rawEmail);
     const city = sanitizeField(rawCity);
 
     const rawPlatform = mapping.platform !== undefined ? (row[mapping.platform] || '').toString() : '';
@@ -180,7 +174,7 @@ export async function performSheetSync() {
       currentSheetPhones.add(phone);
     }
 
-    if (isLowQualityLead(name, phone, email, city)) {
+    if (isLowQualityLead(name, phone, city)) {
       skippedLowQuality++;
       continue;
     }
@@ -190,7 +184,7 @@ export async function performSheetSync() {
     const statusRaw = (row[mapping.status] || '').toString().trim().toLowerCase();
 
     // Deduplicate exact identical rows from the sheet
-    const fullDataHash = `${name}|${phone}|${email}|${city}|${adname}|${branch}|${createdAtRaw}|${remark || ''}|${statusRaw}|${followUpDate1 ? followUpDate1.getTime() : ''}|${followUpDate2 ? followUpDate2.getTime() : ''}|${platform}`;
+    const fullDataHash = `${name}|${phone}|${city}|${adname}|${branch}|${createdAtRaw}|${remark || ''}|${statusRaw}|${followUpDate1 ? followUpDate1.getTime() : ''}|${followUpDate2 ? followUpDate2.getTime() : ''}|${platform}`;
     if (seenFullData.has(fullDataHash)) {
       skippedDuplicates++;
       continue;
@@ -244,7 +238,6 @@ export async function performSheetSync() {
       if (
         existing.name !== name ||
         existing.phone !== phone ||
-        existing.email !== email ||
         existing.city !== city ||
         existing.adname !== adname ||
         existing.branch !== branch ||
@@ -260,7 +253,6 @@ export async function performSheetSync() {
           data: {
             name,
             phone,
-            email,
             city,
             adname,
             branch,
@@ -280,7 +272,6 @@ export async function performSheetSync() {
       toCreate.push({
         name,
         phone,
-        email,
         city,
         adname,
         branch,

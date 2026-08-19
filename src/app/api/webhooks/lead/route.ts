@@ -6,17 +6,16 @@ import { checkAndNotify } from '@/lib/notifications';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, phone, email, city, adname, branch, followUpDate1, followUpDate2, remark } = body;
+    const { name, phone, city, adname, branch, followUpDate1, followUpDate2, remark } = body;
     
     const parsedName = (name || '').toString().trim();
     const rawPhone = (phone || '').toString().trim();
     const parsedPhone = parsePhoneNumber(rawPhone);
-    const parsedEmail = (email || '').toString().trim();
     const parsedCity = (city || '').toString().trim();
     
-    if (!parsedName && !parsedPhone && !parsedEmail && !parsedCity) {
+    if (!parsedName && !parsedPhone && !parsedCity) {
       return NextResponse.json(
-        { error: 'Lead must contain at least a name, phone, email, or city' },
+        { error: 'Lead must contain at least a name, phone, or city' },
         { status: 400 }
       );
     }
@@ -46,7 +45,6 @@ export async function POST(request: NextRequest) {
         data: {
           name: parsedName,
           phone: parsedPhone,
-          email: parsedEmail,
           city: parsedCity,
           adname: adname ? String(adname).trim() : '',
           branch: branch ? String(branch).trim() : '',

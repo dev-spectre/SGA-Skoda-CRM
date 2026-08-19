@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const skip = (page - 1) * limit;
 
-    const validFields = ['name', 'city', 'adname', 'branch', 'status', 'phone', 'email', 'followUpDate1', 'followUpDate2'];
+    const validFields = ['name', 'city', 'adname', 'branch', 'status', 'phone', 'followUpDate1', 'followUpDate2'];
     if (!validFields.includes(secondaryField)) {
       secondaryField = 'name';
     }
@@ -84,7 +84,6 @@ export async function GET(request: NextRequest) {
         const fields: any[] = [
           { name: { contains: token, mode: 'insensitive' } },
           { phone: { contains: token, mode: 'insensitive' } },
-          { email: { contains: token, mode: 'insensitive' } },
           { city: { contains: token, mode: 'insensitive' } },
           { adname: { contains: token, mode: 'insensitive' } },
           { branch: { contains: token, mode: 'insensitive' } },
@@ -188,7 +187,7 @@ export async function GET(request: NextRequest) {
       }
     }
     
-    const [leads, total, statusCounts] = await Promise.all([
+    const [leads, total, statusCounts, maxAggregate] = await Promise.all([
       prisma.lead.findMany({
         where,
         orderBy,
@@ -198,7 +197,6 @@ export async function GET(request: NextRequest) {
           id: true,
           name: true,
           phone: true,
-          email: true,
           city: true,
           adname: true,
           branch: true,
@@ -227,6 +225,12 @@ export async function GET(request: NextRequest) {
           status: true,
         },
       }),
+      prisma.lead.aggregate({
+        where,
+        _max: {
+          updatedAt: true,
+        },
+      }),
     ]);
     
     let totalLeads = 0;
@@ -249,8 +253,11 @@ export async function GET(request: NextRequest) {
       }
     });
     
+    const maxUpdatedAt = maxAggregate._max.updatedAt || null;
+
     return NextResponse.json({
       leads,
+      maxUpdatedAt: maxUpdatedAt ? maxUpdatedAt.toISOString() : null,
       userRole: currentUser?.role || 'USER',
       assignedBranch: currentUser?.assignedBranch || null,
       assignedPlatform: currentUser?.assignedPlatform || null,

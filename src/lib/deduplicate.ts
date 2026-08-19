@@ -24,7 +24,6 @@ function scoreLead(lead: {
   remark?: string | null;
   followUpDate1?: Date | null;
   followUpDate2?: Date | null;
-  email?: string | null;
   testDrive?: string | null;
   branch?: string | null;
   adname?: string | null;
@@ -40,8 +39,6 @@ function scoreLead(lead: {
   if (lead.remark && lead.remark.trim()) score += 30;
   // Has follow up date (+20)
   if (lead.followUpDate1 || lead.followUpDate2) score += 20;
-  // Has email (+10)
-  if (lead.email && lead.email.trim()) score += 10;
   // Has test drive (+10)
   if (lead.testDrive && lead.testDrive.trim()) score += 10;
   // Has branch (+5)
@@ -79,10 +76,9 @@ export async function findDuplicateLeads(): Promise<{
       groupsByPhone.set(cleanPhone, existing);
     } else {
       const cleanName = (lead.name || '').trim().toLowerCase();
-      const cleanEmail = (lead.email || '').trim().toLowerCase();
       const cleanCity = (lead.city || '').trim().toLowerCase();
-      if (cleanName && (cleanEmail || cleanCity)) {
-        const key = `${cleanName}|${cleanEmail}|${cleanCity}`;
+      if (cleanName && cleanCity) {
+        const key = `${cleanName}|${cleanCity}`;
         const existing = groupsByOther.get(key) || [];
         existing.push(lead);
         groupsByOther.set(key, existing);
@@ -159,7 +155,6 @@ export async function executeDeleteDuplicateLeads(): Promise<DeduplicateExecutio
     const patch: any = {};
     for (const dup of duplicates) {
       allDuplicateIds.push(dup.id);
-      if (!keeper.email && dup.email) patch.email = dup.email;
       if (!keeper.city && dup.city) patch.city = dup.city;
       if (!keeper.branch && dup.branch) patch.branch = dup.branch;
       if (!keeper.adname && dup.adname) patch.adname = dup.adname;

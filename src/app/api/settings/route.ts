@@ -23,7 +23,7 @@ export async function GET() {
         selectedSpreadsheetId: null,
         selectedSpreadsheetName: null,
         selectedSheetName: null,
-        notificationInterval: 5,
+        notificationInterval: 15,
         backgroundNotificationsEnabled: true,
         columnMapping: null,
         lastSyncAt: null,

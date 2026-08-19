@@ -46,13 +46,12 @@ export async function POST(request: NextRequest) {
     const DEFAULT_MAPPING = {
       name: 0,
       phone: 1,
-      email: 2,
-      city: 3,
-      createdAt: 4,
-      remark: 5,
-      status: 6,
-      adname: 7,
-      branch: 8,
+      city: 2,
+      createdAt: 3,
+      remark: 4,
+      status: 5,
+      adname: 6,
+      branch: 7,
       assignedConsultant: -1,
       testDrive: -1,
       platform: -1,
@@ -126,9 +125,8 @@ export async function POST(request: NextRequest) {
       }
       seenPhonesInSheet.add(phone);
 
-      const cleanEmail = sanitizeField(getVal(row, mapping.email));
       const cleanCity = sanitizeField(getVal(row, mapping.city));
-      const fingerprint = `${name.toLowerCase()}|${phone}|${cleanEmail.toLowerCase()}|${cleanCity.toLowerCase()}`;
+      const fingerprint = `${name.toLowerCase()}|${phone}|${cleanCity.toLowerCase()}`;
 
       if (existingByFingerprint.has(fingerprint) || existingByPhone.has(phone)) {
         skipped++;
@@ -176,7 +174,6 @@ export async function POST(request: NextRequest) {
       toCreate.push({
         name: name || 'Unknown',
         phone,
-        email: cleanEmail,
         city: cleanCity,
         adname: sanitizeField(getVal(row, mapping.adname)),
         branch,

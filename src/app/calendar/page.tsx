@@ -8,7 +8,6 @@ interface Lead {
   name: string;
   phone: string;
   status: string;
-  email?: string;
   city?: string;
   branch?: string;
   adname?: string;
@@ -287,12 +286,6 @@ export default function CalendarPage() {
                               <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-secondary)", fontWeight: 600 }}>Phone</span>
                               <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }}>{parsePhoneNumber(lead.phone)}</span>
                             </div>
-                            {lead.email && (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-secondary)", fontWeight: 600 }}>Email</span>
-                                <span style={{ fontSize: 14, fontWeight: 500, color: "var(--text-primary)" }}>{lead.email}</span>
-                              </div>
-                            )}
                             {lead.city && (
                               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                                 <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-secondary)", fontWeight: 600 }}>City</span>

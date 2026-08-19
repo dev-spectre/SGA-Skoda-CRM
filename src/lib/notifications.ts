@@ -79,7 +79,7 @@ export async function checkAndNotify() {
   try {
     const settings = await prisma.settings.findUnique({ where: { id: 1 } });
     if (settings && settings.backgroundNotificationsEnabled === false) {
-      return { notified: 0, interval: settings.notificationInterval || 5, disabled: true };
+      return { notified: 0, interval: settings.notificationInterval || 15, disabled: true };
     }
 
     // 1. Perform automatic sheet sync in background (with 5s max timeout to prevent HTTP timeout)
@@ -92,7 +92,7 @@ export async function checkAndNotify() {
       console.error('Auto background sync warning:', syncErr);
     }
 
-    const intervalMinutes = settings?.notificationInterval || 5;
+    const intervalMinutes = settings?.notificationInterval || 15;
     
     const endOfToday = new Date();
     endOfToday.setHours(23, 59, 59, 999);
@@ -167,13 +167,13 @@ export async function checkAndNotify() {
   } catch (error: any) {
     const errorMsg = error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
     console.error('Notification check failed:', errorMsg);
-    return { notified: 0, interval: 5, error: errorMsg };
+    return { notified: 0, interval: 15, error: errorMsg };
   }
 }
 
 let notificationTimer: ReturnType<typeof setInterval> | null = null;
 
-export function startNotificationLoop(intervalMinutes: number = 5) {
+export function startNotificationLoop(intervalMinutes: number = 15) {
   stopNotificationLoop();
   const intervalMs = intervalMinutes * 60 * 1000;
   checkAndNotify().catch(console.error);
@@ -199,7 +199,7 @@ export async function restartNotificationLoop() {
     stopNotificationLoop();
     return;
   }
-  const interval = settings?.notificationInterval || 5;
+  const interval = settings?.notificationInterval || 15;
   startNotificationLoop(interval);
 }
 

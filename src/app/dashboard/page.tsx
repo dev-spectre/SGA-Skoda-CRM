@@ -15,7 +15,6 @@ interface Lead {
   id: number;
   name: string;
   phone: string;
-  email?: string;
   city: string;
   adname?: string;
   branch?: string;
@@ -31,6 +30,7 @@ interface Lead {
   uploadedById?: number | null;
   uploadedBy?: { id?: number; username: string } | null;
   uploadedAt?: string | null;
+  updatedAt?: string;
 }
 
 interface PerformanceStat {
@@ -131,6 +131,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats>({ total: 0, pending: 0, live: 0, lost: 0 });
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: 20, total: 0, totalPages: 0 });
   const [mounted, setMounted] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
@@ -158,6 +159,14 @@ export default function DashboardPage() {
   const [consultantsList, setConsultantsList] = useState<ConsultantItem[]>([]);
   const [usersList, setUsersList] = useState<{ id: number; username: string; role: string }[]>([]);
 
+  // Debounce search input by 350ms to avoid querying on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
   // Restore saved filters from localStorage per authenticated user
   const restoreUserFilters = useCallback((userKey: string) => {
     try {
@@ -165,7 +174,10 @@ export default function DashboardPage() {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (typeof parsed.search === "string") setSearch(parsed.search);
+        if (typeof parsed.search === "string") {
+          setSearchInput(parsed.search);
+          setSearch(parsed.search);
+        }
         if (typeof parsed.statusFilter === "string") setStatusFilter(parsed.statusFilter);
         if (typeof parsed.branchFilter === "string") setBranchFilter(parsed.branchFilter);
         if (typeof parsed.consultantFilter === "string") setConsultantFilter(parsed.consultantFilter);
@@ -199,6 +211,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchUsersList();
+    fetchBranchesList();
+    fetchConsultantsList();
     fetch("/api/auth/me")
       .then((res) => res.json())
       .then((data) => {
@@ -325,7 +339,7 @@ export default function DashboardPage() {
   const activeFetchIdRef = useRef(0);
   const isFetchingRef = useRef(false);
   const prefetchCache = useRef<Record<string, any>>({});
-  const lastKnownStateRef = useRef<string | null>(null);
+  const lastSyncTimestampRef = useRef<string | null>(null);
 
   const startUpdating = () => {
     updatingCountRef.current++;
@@ -378,6 +392,21 @@ export default function DashboardPage() {
     } catch {
       // fallback
     }
+  }, []);
+
+  const updateBranchWindow = useCallback((incoming: { branch?: string }[]) => {
+    if (!Array.isArray(incoming) || incoming.length === 0) return;
+    setApiBranches(prev => {
+      const existing = new Set(prev.map(b => b.toLowerCase().trim()));
+      const toAdd: string[] = [];
+      for (const item of incoming) {
+        if (item.branch && item.branch.trim() && !existing.has(item.branch.toLowerCase().trim())) {
+          existing.add(item.branch.toLowerCase().trim());
+          toAdd.push(item.branch.trim());
+        }
+      }
+      return toAdd.length > 0 ? [...prev, ...toAdd].sort((a, b) => a.localeCompare(b)) : prev;
+    });
   }, []);
 
   const fetchPerformanceStats = useCallback(async () => {
@@ -459,6 +488,19 @@ export default function DashboardPage() {
         setAccessRestricted(false);
         setLeads(data.leads);
         setStats(data.stats);
+        if (Array.isArray(data.leads)) {
+          updateBranchWindow(data.leads);
+        }
+        if (data.maxUpdatedAt) {
+          lastSyncTimestampRef.current = data.maxUpdatedAt;
+        } else if (Array.isArray(data.leads) && data.leads.length > 0) {
+          let maxT = '';
+          for (const l of data.leads) {
+            const t = l.updatedAt || l.createdAt;
+            if (t && t > maxT) maxT = t;
+          }
+          if (maxT) lastSyncTimestampRef.current = maxT;
+        }
         if (data.userRole) {
           setUserRole(data.userRole);
           if (data.userRole === "ADMIN" || data.userRole === "SUPERADMIN") fetchPerformanceStats();
@@ -506,18 +548,129 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder]);
+  }, [pagination.page, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, updateBranchWindow]);
 
+
+  const filterStateRef = useRef({
+    search,
+    statusFilter,
+    branchFilter,
+    consultantFilter,
+    testDriveFilter,
+    uploaderFilter,
+    startDate,
+    endDate,
+    page: pagination.page,
+    limit: pagination.limit,
+    total: pagination.total,
+  });
 
   useEffect(() => {
-    fetchBranchesList();
-    fetchConsultantsList();
-    setTimeout(() => fetchLeads(), 0);
+    filterStateRef.current = {
+      search,
+      statusFilter,
+      branchFilter,
+      consultantFilter,
+      testDriveFilter,
+      uploaderFilter,
+      startDate,
+      endDate,
+      page: pagination.page,
+      limit: pagination.limit,
+      total: pagination.total,
+    };
+  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, pagination.page, pagination.limit, pagination.total]);
+
+  useEffect(() => {
+    fetchLeads();
+
+    // Perform lightweight incremental check and patch changed leads in-place (no full DB egress)
+    const performIncrementalCheck = async () => {
+      if (document.visibilityState !== 'visible' || updatingCountRef.current > 0 || isFetchingRef.current) {
+        return;
+      }
+      try {
+        const f = filterStateRef.current;
+        const checkParams = new URLSearchParams();
+        if (lastSyncTimestampRef.current) {
+          checkParams.set("since", lastSyncTimestampRef.current);
+        }
+        if (f.search) checkParams.set("search", f.search);
+        if (f.statusFilter) checkParams.set("status", f.statusFilter);
+        if (f.branchFilter) checkParams.set("branch", f.branchFilter);
+        if (f.consultantFilter) checkParams.set("consultant", f.consultantFilter);
+        if (f.testDriveFilter) checkParams.set("testDrive", f.testDriveFilter);
+        if (f.uploaderFilter) {
+          if (f.uploaderFilter === "system") checkParams.set("source", "System");
+          else if (f.uploaderFilter === "external") checkParams.set("source", "External Upload");
+          else if (f.uploaderFilter.startsWith("user:")) checkParams.set("uploader", f.uploaderFilter.replace("user:", ""));
+        }
+        if (f.startDate) checkParams.set("startDate", f.startDate);
+        if (f.endDate) checkParams.set("endDate", f.endDate);
+
+        const res = await fetch(`/api/leads/check?${checkParams.toString()}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        // If nothing has changed, do NOTHING (0 additional network requests)
+        if (!data.hasChanges) {
+          if (data.lastUpdated) {
+            lastSyncTimestampRef.current = data.lastUpdated;
+          }
+          return;
+        }
+
+        // Advance sync timestamp
+        if (data.lastUpdated) {
+          lastSyncTimestampRef.current = data.lastUpdated;
+        }
+
+        // 1. Immediately update dashboard stat cards with fresh counts
+        if (data.stats) {
+          setStats(data.stats);
+        }
+
+        // 2. Patch changed leads directly in-place without refetching from DB
+        if (Array.isArray(data.changedLeads) && data.changedLeads.length > 0) {
+          updateBranchWindow(data.changedLeads);
+
+          const changedMap = new Map<number, Lead>(data.changedLeads.map((l: Lead) => [l.id, l]));
+
+          setLeads(prevLeads => {
+            const existingIds = new Set(prevLeads.map(l => l.id));
+
+            // Update any existing leads on current page in-place
+            let updated = prevLeads.map(l => {
+              if (changedMap.has(l.id)) {
+                return { ...l, ...changedMap.get(l.id)! };
+              }
+              return l;
+            });
+
+            // If on page 1 and there are new incoming leads, prepend them in-place
+            const newIncoming = data.changedLeads.filter((l: Lead) => !existingIds.has(l.id));
+            if (newIncoming.length > 0 && filterStateRef.current.page === 1) {
+              updated = [...newIncoming, ...updated].slice(0, filterStateRef.current.limit || 20);
+            }
+
+            return updated;
+          });
+
+          // Update pagination total if count changed
+          if (data.count !== undefined && data.count !== filterStateRef.current.total) {
+            setPagination(p => ({ ...p, total: data.count, totalPages: Math.ceil(data.count / p.limit) }));
+          }
+        } else if (data.count !== undefined && data.count !== filterStateRef.current.total) {
+          setPagination(p => ({ ...p, total: data.count, totalPages: Math.ceil(data.count / p.limit) }));
+        }
+      } catch {
+        // silently ignore check errors
+      }
+    };
 
     const handleLeadsUpdated = () => {
-      fetchBranchesList();
-      fetchConsultantsList();
-      fetchLeads();
+      performIncrementalCheck();
     };
 
     if (typeof window !== "undefined") {
@@ -525,24 +678,7 @@ export default function DashboardPage() {
     }
 
     // Smart auto-refresh: polls lightweight check API every 60s, pauses if tab hidden or updating
-    const autoRefreshInterval = setInterval(async () => {
-      if (document.visibilityState !== 'visible' || updatingCountRef.current > 0 || isFetchingRef.current) {
-        return;
-      }
-      try {
-        const res = await fetch('/api/leads/check');
-        if (res.ok) {
-          const data = await res.json();
-          const currentState = `${data.count}-${data.lastUpdated}`;
-          if (lastKnownStateRef.current !== currentState) {
-            lastKnownStateRef.current = currentState;
-            fetchLeads(false, true);
-          }
-        }
-      } catch (e) {
-        // silently ignore check errors
-      }
-    }, 60000);
+    const autoRefreshInterval = setInterval(performIncrementalCheck, 60000);
 
     return () => {
       if (typeof window !== "undefined") {
@@ -550,7 +686,7 @@ export default function DashboardPage() {
       }
       clearInterval(autoRefreshInterval);
     };
-  }, [fetchLeads, fetchBranchesList, fetchConsultantsList]);
+  }, [fetchLeads, updateBranchWindow]);
 
 
   const fetchAllFilteredLeads = async () => {
@@ -606,46 +742,119 @@ export default function DashboardPage() {
   }, [leads, apiBranches]);
 
 
-  const getConsultantsForLead = useCallback((lead: Lead) => {
-    if (!lead.branch || !lead.branch.trim()) {
-      return consultantsList;
-    }
+  const getConsultantGroupsForLead = useCallback((lead: Lead) => {
+    // 1. Parse lead branches
+    const leadBranches = lead.branch
+      ? parseBranches(lead.branch).map(b => b.toLowerCase().trim())
+      : [];
+    const rawLeadBranch = (lead.branch || '').toLowerCase().replace(/[_-]/g, ' ').trim();
 
-    const leadBranches = parseBranches(lead.branch).map(b => b.toLowerCase().trim());
-    const rawLeadBranch = lead.branch.toLowerCase().replace(/[_-]/g, ' ').trim();
-
-    const matching = consultantsList.filter(c => {
-      if (!c.branch) return false;
-      const cBranch = c.branch.toLowerCase().trim();
-      const parsedCBranches = parseBranches(c.branch).map(b => b.toLowerCase().trim());
-
+    const isBranchMatching = (branchName: string) => {
+      if (!branchName || branchName.toLowerCase() === 'other' || branchName.toLowerCase() === 'unassigned') {
+        return false;
+      }
+      if (leadBranches.length === 0 && !rawLeadBranch) {
+        return false;
+      }
+      const bLower = branchName.toLowerCase().trim();
       return (
-        leadBranches.includes(cBranch) ||
-        leadBranches.some(lb => lb === cBranch || lb.includes(cBranch) || cBranch.includes(lb)) ||
-        parsedCBranches.some(pcb => leadBranches.includes(pcb)) ||
-        rawLeadBranch.includes(cBranch)
+        leadBranches.includes(bLower) ||
+        leadBranches.some(lb => lb === bLower || lb.includes(bLower) || bLower.includes(lb)) ||
+        (rawLeadBranch !== '' && (rawLeadBranch.includes(bLower) || bLower.includes(rawLeadBranch)))
       );
+    };
+
+    // 2. Group consultants by branch
+    const groupMap = new Map<string, Map<string, ConsultantItem>>(); // branchName -> Map(consultantNameLower -> ConsultantItem)
+
+    const addConsultantToBranch = (branch: string, c: ConsultantItem) => {
+      const cleanBranch = branch.trim() || 'Other';
+      if (!groupMap.has(cleanBranch)) {
+        groupMap.set(cleanBranch, new Map());
+      }
+      const map = groupMap.get(cleanBranch)!;
+      const nameKey = c.name.toLowerCase().trim();
+      if (!map.has(nameKey)) {
+        map.set(nameKey, c);
+      }
+    };
+
+    // Populate from consultantsList
+    consultantsList.forEach(c => {
+      if (!c.branch || !c.branch.trim()) {
+        addConsultantToBranch('Other', c);
+      } else {
+        const parsed = parseBranches(c.branch);
+        if (parsed.length > 0) {
+          parsed.forEach(b => addConsultantToBranch(b, c));
+        } else {
+          addConsultantToBranch(c.branch.trim(), c);
+        }
+      }
     });
 
-    // Ensure currently assigned consultant is included
+    // 3. Ensure currently assigned consultant is included if set
     if (lead.assignedConsultant && lead.assignedConsultant.trim()) {
       const assignedName = lead.assignedConsultant.trim();
-      const alreadyIncluded = matching.some(
-        c => c.name.toLowerCase() === assignedName.toLowerCase()
-      );
-      if (!alreadyIncluded) {
-        const foundInAll = consultantsList.find(
-          c => c.name.toLowerCase() === assignedName.toLowerCase()
-        );
-        if (foundInAll) {
-          return [foundInAll, ...matching];
+      const assignedLower = assignedName.toLowerCase();
+
+      // Check if already present in any branch
+      let foundInAnyGroup = false;
+      for (const m of groupMap.values()) {
+        if (m.has(assignedLower)) {
+          foundInAnyGroup = true;
+          break;
+        }
+      }
+
+      if (!foundInAnyGroup) {
+        const existingInList = consultantsList.find(c => c.name.toLowerCase().trim() === assignedLower);
+        if (existingInList && existingInList.branch) {
+          const parsed = parseBranches(existingInList.branch);
+          if (parsed.length > 0) {
+            parsed.forEach(b => addConsultantToBranch(b, existingInList));
+          } else {
+            addConsultantToBranch(existingInList.branch.trim(), existingInList);
+          }
         } else {
-          return [{ id: -1, name: assignedName, branch: lead.branch || '' }, ...matching];
+          // Place under lead's first branch if available, else 'Other'
+          const leadParsed = parseBranches(lead.branch);
+          const targetBranch = leadParsed.length > 0 ? leadParsed[0] : (lead.branch?.trim() || 'Other');
+          addConsultantToBranch(targetBranch, {
+            id: -1,
+            name: assignedName,
+            branch: targetBranch
+          });
         }
       }
     }
 
-    return matching;
+    // 4. Construct sorted groups: matching first, then other branches alphabetically, then 'Other'
+    const matchingGroups: { branch: string; consultants: ConsultantItem[] }[] = [];
+    const otherGroups: { branch: string; consultants: ConsultantItem[] }[] = [];
+    let otherUnassignedGroup: { branch: string; consultants: ConsultantItem[] } | null = null;
+
+    groupMap.forEach((cMap, branchName) => {
+      const list = Array.from(cMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+      if (list.length === 0) return;
+
+      if (branchName.toLowerCase() === 'other' || branchName.toLowerCase() === 'unassigned') {
+        otherUnassignedGroup = { branch: branchName, consultants: list };
+      } else if (isBranchMatching(branchName)) {
+        matchingGroups.push({ branch: branchName, consultants: list });
+      } else {
+        otherGroups.push({ branch: branchName, consultants: list });
+      }
+    });
+
+    matchingGroups.sort((a, b) => a.branch.localeCompare(b.branch));
+    otherGroups.sort((a, b) => a.branch.localeCompare(b.branch));
+
+    const result = [...matchingGroups, ...otherGroups];
+    if (otherUnassignedGroup) {
+      result.push(otherUnassignedGroup);
+    }
+    return result;
   }, [consultantsList]);
 
   const filteredConsultantsForFilterBar = useMemo(() => {
@@ -689,7 +898,6 @@ export default function DashboardPage() {
     const exportData = exportLeads.map((l: Lead) => ({
       Name: l.name,
       Phone: l.phone,
-      Email: l.email || "-",
       City: l.city || "-",
       "Ad Name": l.adname || "-",
       Branch: l.branch ? parseBranches(l.branch).join(", ") : "-",
@@ -1131,7 +1339,7 @@ export default function DashboardPage() {
 
       {/* Stats */}
       {(() => {
-        const isFiltered = mounted && Boolean(search || statusFilter || branchFilter || consultantFilter || testDriveFilter || startDate || endDate);
+        const isFiltered = mounted && Boolean(searchInput || search || statusFilter || branchFilter || consultantFilter || testDriveFilter || uploaderFilter || startDate || endDate);
         return (
 
           <div className="stats-grid">
@@ -1270,8 +1478,11 @@ export default function DashboardPage() {
         <input
           type="text"
           placeholder="Search by name, phone, city..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value);
+            setPagination(p => ({ ...p, page: 1 }));
+          }}
         />
         <select
           value={statusFilter}
@@ -1300,7 +1511,6 @@ export default function DashboardPage() {
             />
           </div>
         ) : userAssignedBranch ? (
-
           <div
             style={{
               display: "inline-flex",
@@ -1328,68 +1538,55 @@ export default function DashboardPage() {
             ))}
           </select>
         )}
+
+        {/* Test Drive Filter */}
         <select
           value={testDriveFilter}
           onChange={(e) => { setTestDriveFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-          style={{
-            borderColor: testDriveFilter === "Yes" ? "var(--primary)" : undefined,
-            fontWeight: testDriveFilter ? 600 : 400,
-          }}
         >
           <option value="">All Test Drives</option>
-          <option value="Yes">Yes</option>
-          <option value="No">No</option>
+          <option value="Scheduled">Scheduled</option>
+          <option value="Completed">Completed</option>
+          <option value="Cancelled">Cancelled</option>
           <option value="Not Scheduled">Not Scheduled</option>
         </select>
 
-        {/* Source / Uploader Filter */}
+        {/* Lead Source / Uploader Filter */}
         <select
           value={uploaderFilter}
           onChange={(e) => { setUploaderFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-          style={{
-            borderColor: uploaderFilter ? "var(--primary)" : undefined,
-            fontWeight: uploaderFilter ? 600 : 400,
-          }}
-          title="Filter by Lead Source or Uploader"
         >
-          <option value="">All Sources & Uploaders</option>
-          <option value="system">📊 Google Sheet (Sync)</option>
-          <option value="external">📤 All External Uploads</option>
-          {usersList.length > 0 && (
-            <optgroup label="Uploaded By User">
+          <option value="">All Lead Sources</option>
+          <option value="system">Google Sheet (Auto-Sync)</option>
+          <option value="external">All External Uploads</option>
+          {usersList && usersList.length > 0 && (
+            <optgroup label="Uploaded by User">
               {usersList.map((u) => (
                 <option key={u.id} value={`user:${u.username}`}>
-                  👤 Uploaded by: {u.username}
+                  Uploaded by {u.username} ({u.role})
                 </option>
               ))}
             </optgroup>
           )}
         </select>
 
-        {/* Today Lead Button */}
+        {/* Date Filter Quick Pills / Custom Modal Trigger */}
         <button
-          className={`btn ${isTodayActive ? "btn-primary" : "btn-ghost"}`}
+          type="button"
           onClick={handleToggleToday}
-          title="Extract Today's Leads"
-          style={{ display: "flex", alignItems: "center", gap: 6 }}
+          className={`btn ${isTodayActive ? "btn-primary" : "btn-ghost"}`}
+          style={{ padding: "6px 14px", fontSize: 13, height: 38 }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-          Today's Leads
+          Today
         </button>
 
-        {/* Date Range Calendar Button */}
         <button
-          className={`btn ${(startDate || endDate) && !isTodayActive ? "btn-primary" : "btn-ghost"}`}
+          type="button"
           onClick={openDateModal}
-          title="Select Date Range"
-          style={{ display: "flex", alignItems: "center", gap: 6 }}
+          className={`btn ${startDate || endDate ? "btn-primary" : "btn-ghost"}`}
+          style={{ padding: "6px 14px", fontSize: 13, height: 38, display: "flex", alignItems: "center", gap: 6 }}
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}>
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />
@@ -1402,10 +1599,11 @@ export default function DashboardPage() {
         </button>
 
         {/* Clear Date Filter Chip */}
-        {(search || statusFilter || branchFilter || consultantFilter || testDriveFilter || uploaderFilter || startDate || endDate) && (
+        {(searchInput || search || statusFilter || branchFilter || consultantFilter || testDriveFilter || uploaderFilter || startDate || endDate) && (
           <button
             className="btn btn-ghost"
             onClick={() => {
+              setSearchInput("");
               setSearch("");
               setStatusFilter("");
               setBranchFilter("");
@@ -1559,10 +1757,14 @@ export default function DashboardPage() {
                           onChange={(e) => handleAssignedConsultantUpdate(lead, e.target.value)}
                         >
                           <option value="">Unassigned</option>
-                          {getConsultantsForLead(lead).map((c) => (
-                            <option key={`${c.id}-${c.name}`} value={c.name}>
-                              {c.name}
-                            </option>
+                          {getConsultantGroupsForLead(lead).map((group) => (
+                            <optgroup key={group.branch} label={group.branch}>
+                              {group.consultants.map((c) => (
+                                <option key={`${group.branch}-${c.id}-${c.name}`} value={c.name}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </td>

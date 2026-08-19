@@ -3,7 +3,6 @@ import { getSheetData, updateSheetRow } from './google';
 export interface ColumnMapping {
   name: number;
   phone: number;
-  email: number;
   city: number;
   adname: number;
   branch: number;
@@ -41,7 +40,6 @@ export async function computeIntelligentMapping(
   const regexMap: Record<keyof ColumnMapping, RegExp[]> = {
     name: [/^full\s?_?name$/i, /^first\s?_?name$/i, /^name$/i, /client\s?_?name/i, /lead\s?_?name/i, /name/i],
     phone: [/^phone$/i, /^mobile$/i, /^contact\s?_?no/i, /phone|mobile|contact|cell|number/i],
-    email: [/^email$/i, /^e-?mail\s?address$/i, /email|mail/i],
     city: [/^city$/i, /^location$/i, /city|location|town/i],
     adname: [/^ad\s?_?name$/i, /^campaign\s?_?name$/i, /ad\s?name|campaign\s?name/i],
     branch: [/^branch$/i, /^office$/i, /branch|office/i],
@@ -146,7 +144,6 @@ export async function computeIntelligentMapping(
 
   if (mapping.name === undefined) mapping.name = 0;
   if (mapping.phone === undefined) mapping.phone = 1;
-  if (mapping.email === undefined) mapping.email = 2;
   if (mapping.city === undefined) assignFreeColumn('city', 'City');
   if (mapping.adname === undefined) assignFreeColumn('adname', 'Ad Name');
   if (mapping.branch === undefined) assignFreeColumn('branch', 'Branch');

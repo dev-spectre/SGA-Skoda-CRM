@@ -405,6 +405,13 @@ select:focus, select:hover {
   border-color: #fecaca !important;
 }
 
+.status-select optgroup {
+  font-weight: 700 !important;
+  color: #475569 !important;
+  background-color: #f1f5f9 !important;
+  font-style: normal;
+}
+
 .status-select option {
   background-color: #ffffff !important;
   color: #0f172a !important;

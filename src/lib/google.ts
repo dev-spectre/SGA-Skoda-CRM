@@ -394,7 +394,7 @@ export async function cleanEmptySheetRows(
 export async function findAndWriteToSheetRow(
   spreadsheetId: string,
   sheetName: string,
-  lead: { id: number; name: string; phone: string; email?: string; sheetRow?: number | null; source?: string | null; uploadedById?: number | null },
+  lead: { id: number; name: string; phone: string; sheetRow?: number | null; source?: string | null; uploadedById?: number | null },
   updates: { col: number; value: string }[]
 ): Promise<number | null> {
   // External upload leads are strictly fetch-only and must NEVER write data back to sheets
@@ -414,7 +414,6 @@ export async function findAndWriteToSheetRow(
 
   const cleanLeadPhone = parsePhoneNumber(lead.phone);
   const cleanLeadName = (lead.name || '').trim().toLowerCase();
-  const cleanLeadEmail = (lead.email || '').trim().toLowerCase();
 
   let targetRowIndex: number | null = null;
 
@@ -490,7 +489,6 @@ export async function findAndWriteToSheetRow(
 
         if (mapping.name !== undefined && mapping.name >= 0) newRow[mapping.name] = fullLead.name || '';
         if (mapping.phone !== undefined && mapping.phone >= 0) newRow[mapping.phone] = fullLead.phone || '';
-        if (mapping.email !== undefined && mapping.email >= 0) newRow[mapping.email] = fullLead.email || '';
         if (mapping.city !== undefined && mapping.city >= 0) newRow[mapping.city] = fullLead.city || '';
         if (mapping.adname !== undefined && mapping.adname >= 0) newRow[mapping.adname] = fullLead.adname || '';
         if (mapping.branch !== undefined && mapping.branch >= 0) newRow[mapping.branch] = fullLead.branch || '';
@@ -546,7 +544,7 @@ export async function findAndWriteToSheetRow(
 export async function findAndDeleteSheetRow(
   spreadsheetId: string,
   sheetName: string,
-  lead: { id: number; name: string; phone: string; email?: string; sheetRow?: number | null; source?: string | null; uploadedById?: number | null }
+  lead: { id: number; name: string; phone: string; sheetRow?: number | null; source?: string | null; uploadedById?: number | null }
 ): Promise<boolean> {
   // External upload leads are strictly fetch-only and must NEVER write data back to sheets
   if (lead.source === 'External Upload' || (lead.uploadedById !== null && lead.uploadedById !== undefined)) {

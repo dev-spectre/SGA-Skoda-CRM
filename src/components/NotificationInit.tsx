@@ -36,7 +36,7 @@ export async function registerWebPushSubscription(customInterval?: number) {
 
     if (subscription) {
       const storedInterval = localStorage.getItem('device_notification_interval');
-      const interval = customInterval ?? (storedInterval ? parseInt(storedInterval) : 5);
+      const interval = customInterval ?? (storedInterval ? parseInt(storedInterval) : 15);
 
       await fetch('/api/push/subscribe', {
         method: 'POST',
@@ -121,7 +121,7 @@ export function NotificationInit() {
     };
 
     const runCheck = async () => {
-      let nextIntervalMs = 60 * 1000; // default 1 min
+      let nextIntervalMs = 15 * 60 * 1000; // default 15 min
       try {
         const res = await fetch("/api/notifications/check");
         if (res.ok) {
@@ -130,8 +130,8 @@ export function NotificationInit() {
             nextIntervalMs = data.interval * 60 * 1000;
           }
 
-          // Notify dashboard components of updated lead state
-          if (typeof window !== 'undefined') {
+          // Only notify dashboard components if new leads were actually synced
+          if (data.newLeadsSynced > 0 && typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('crm-leads-updated'));
           }
         }
