@@ -66,3 +66,57 @@ export function parseBranches(branchStr: string | null | undefined): string[] {
   return Array.from(new Set(parsed));
 }
 
+export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'live' | 'lost' {
+  if (!rawStatusStr) return 'not_contacted';
+
+  const norm = String(rawStatusStr).toLowerCase().replace(/[\s_]+/g, '').trim();
+  if (!norm) return 'not_contacted';
+
+  // 1. created / CREATED / not contacted -> not contacted ('not_contacted' in DB)
+  if (
+    norm === 'created' ||
+    norm === 'notcontacted' ||
+    norm === 'new'
+  ) {
+    return 'not_contacted';
+  }
+
+  // 2. completed / COMPLETED -> completed ('live' in DB)
+  if (
+    norm === 'completed' ||
+    norm === 'won' ||
+    norm === 'closedsuccessful' ||
+    norm === 'closed' ||
+    norm === 'booked' ||
+    norm === 'done'
+  ) {
+    return 'live';
+  }
+
+  // 3. lost lead / LOST LEAD / lost -> lost ('lost' in DB)
+  if (
+    norm.includes('lost') ||
+    norm === 'dead' ||
+    norm === 'cancelled' ||
+    norm === 'canceled' ||
+    norm === 'closedunsuccessful' ||
+    norm === 'drop'
+  ) {
+    return 'lost';
+  }
+
+  // 4. live lead / LIVE LEAD / contacted -> contacted ('pending' in DB)
+  if (
+    norm.includes('live') ||
+    norm.includes('contacted') ||
+    norm.includes('pending') ||
+    norm.includes('follow') ||
+    norm.includes('warm') ||
+    norm.includes('hot')
+  ) {
+    return 'pending';
+  }
+
+  return 'not_contacted';
+}
+

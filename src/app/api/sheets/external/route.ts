@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { getSheetData } from '@/lib/google';
-import { parsePhoneNumber, sanitizeField } from '@/lib/utils';
+import { parsePhoneNumber, sanitizeField, parseSheetStatus } from '@/lib/utils';
 
 export async function POST(request: NextRequest) {
   try {
@@ -148,11 +148,8 @@ export async function POST(request: NextRequest) {
       const uploadedById = uploaderDbId;
 
       // Status mapping
-      const rawStatus = getVal(row, mapping.status).toLowerCase();
-      let status = 'not_contacted';
-      if (['live', 'completed', 'won', 'closed_successful', 'booked'].some(s => rawStatus.includes(s))) status = 'live';
-      else if (['lost', 'dead', 'closed_unsuccessful', 'cancelled', 'drop'].some(s => rawStatus.includes(s))) status = 'lost';
-      else if (['pending', 'follow up', 'followup', 'contacted', 'warm', 'hot'].some(s => rawStatus.includes(s))) status = 'pending';
+      const rawStatus = getVal(row, mapping.status);
+      const status = parseSheetStatus(rawStatus);
 
       // Test drive mapping
       const rawTd = getVal(row, mapping.testDrive).toLowerCase();

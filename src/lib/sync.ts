@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { getSheetData } from '@/lib/google';
-import { parsePhoneNumber, sanitizeField } from '@/lib/utils';
+import { parsePhoneNumber, sanitizeField, parseSheetStatus } from '@/lib/utils';
 
 interface ColumnMapping {
   name: number;
@@ -199,16 +199,7 @@ export async function performSheetSync() {
       }
     }
 
-    let status = 'not_contacted';
-    if (statusRaw.includes('pending') || statusRaw.includes('contacted') || statusRaw.includes('follow')) {
-      status = 'pending';
-    } else if (statusRaw.includes('live') || statusRaw.includes('successful') || statusRaw === 'closed_successful' || statusRaw === 'closed' || statusRaw.includes('completed')) {
-      status = 'live';
-    } else if (statusRaw.includes('lost') || statusRaw.includes('unsuccessful') || statusRaw === 'closed_unsuccessful') {
-      status = 'lost';
-    } else if (statusRaw.includes('not_contacted') || statusRaw.includes('not contacted') || statusRaw === 'created') {
-      status = 'not_contacted';
-    }
+    const status = parseSheetStatus(statusRaw);
 
     const baseFingerprint = `${phone}|${createdAtRaw}`;
     const count = fingerprintCounts.get(baseFingerprint) || 0;
@@ -232,7 +223,7 @@ export async function performSheetSync() {
       const finalRemark = existing.remark === "" ? "" : (remark || existing.remark);
       
       const normalizedExistingStatus = existing.status === 'created' ? 'not_contacted' : existing.status === 'closed_successful' ? 'live' : existing.status === 'closed_unsuccessful' ? 'lost' : existing.status;
-      const finalStatus = normalizedExistingStatus || status || 'not_contacted';
+      const finalStatus = statusRaw ? status : (normalizedExistingStatus || 'not_contacted');
 
       // Only queue DB update if data actually changed
       if (
