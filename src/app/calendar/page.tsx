@@ -143,31 +143,47 @@ export default function CalendarPage() {
         <div 
           key={i} 
           style={{ 
-            minHeight: "120px", 
+            height: "130px", 
+            maxHeight: "130px",
+            display: "flex",
+            flexDirection: "column",
             borderRight: "1px solid var(--border)", 
             borderBottom: "1px solid var(--border)",
             padding: "8px",
             background: isCurrentMonth ? "transparent" : "rgba(0,0,0,0.02)",
-            opacity: isCurrentMonth ? 1 : 0.5
+            opacity: isCurrentMonth ? 1 : 0.5,
+            overflow: "hidden"
           }}
         >
           {isCurrentMonth && (
             <>
               <div style={{ 
                 fontWeight: 600, 
-                marginBottom: 8,
+                marginBottom: 6,
                 width: 24,
                 height: 24,
+                minHeight: 24,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: "50%",
                 background: isToday ? "var(--primary-light)" : "transparent",
                 color: isToday ? "#fff" : "var(--text-primary)",
+                flexShrink: 0
               }}>
                 {day}
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div 
+                className="custom-scrollbar"
+                style={{ 
+                  display: "flex", 
+                  flexDirection: "column", 
+                  gap: 4, 
+                  overflowY: "auto", 
+                  flex: 1,
+                  paddingRight: 2
+                }}
+              >
                 {dayLeads.map((l, idx) => (
                   <div 
                     key={`${l.id}-${idx}`}
@@ -183,7 +199,8 @@ export default function CalendarPage() {
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
-                      borderLeft: `3px solid ${l.status === 'live' ? "var(--status-live)" : l.status === 'lost' ? "var(--status-lost)" : "var(--status-pending)"}`
+                      borderLeft: `3px solid ${l.status === 'live' ? "var(--status-live)" : l.status === 'lost' ? "var(--status-lost)" : "var(--status-pending)"}`,
+                      flexShrink: 0
                     }}
                     title={l.name}
                   >
