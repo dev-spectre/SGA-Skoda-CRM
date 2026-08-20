@@ -25,6 +25,7 @@ interface Lead {
   status: string;
   createdAt: string;
   assignedConsultant?: string;
+  handledBy?: string | null;
   testDrive?: string;
   platform?: string;
   source?: string;
@@ -139,6 +140,7 @@ export default function DashboardPage() {
   const [consultantFilter, setConsultantFilter] = useState("");
   const [testDriveFilter, setTestDriveFilter] = useState("");
   const [uploaderFilter, setUploaderFilter] = useState("");
+  const [platformFilter, setPlatformFilter] = useState("");
   const [startDate, setStartDate] = useState("");
 
   const [endDate, setEndDate] = useState("");
@@ -184,6 +186,7 @@ export default function DashboardPage() {
         if (typeof parsed.consultantFilter === "string") setConsultantFilter(parsed.consultantFilter);
         if (typeof parsed.testDriveFilter === "string") setTestDriveFilter(parsed.testDriveFilter);
         if (typeof parsed.uploaderFilter === "string") setUploaderFilter(parsed.uploaderFilter);
+        if (typeof parsed.platformFilter === "string") setPlatformFilter(parsed.platformFilter);
         if (typeof parsed.startDate === "string") setStartDate(parsed.startDate);
 
         if (typeof parsed.endDate === "string") setEndDate(parsed.endDate);
@@ -272,6 +275,7 @@ export default function DashboardPage() {
         consultantFilter,
         testDriveFilter,
         uploaderFilter,
+        platformFilter,
         startDate,
 
         endDate,
@@ -283,7 +287,7 @@ export default function DashboardPage() {
     } catch (e) {
       console.error("Failed to save dashboard filters to localStorage:", e);
     }
-  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
+  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
 
   const [loading, setLoading] = useState(true);
   const [accessRestricted, setAccessRestricted] = useState(false);
@@ -357,7 +361,7 @@ export default function DashboardPage() {
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), type === "error" ? 5500 : 3000);
   };
 
   const handleHeaderClick = (field: string) => {
@@ -456,6 +460,7 @@ export default function DashboardPage() {
           params.set('uploader', uploaderFilter.replace('user:', ''));
         }
       }
+      if (platformFilter) params.set("platform", platformFilter);
       if (startDate) params.set("startDate", startDate);
 
       if (endDate) params.set("endDate", endDate);
@@ -554,7 +559,7 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, updateBranchWindow]);
+  }, [pagination.page, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, updateBranchWindow]);
 
 
   const filterStateRef = useRef({
@@ -564,6 +569,7 @@ export default function DashboardPage() {
     consultantFilter,
     testDriveFilter,
     uploaderFilter,
+    platformFilter,
     startDate,
     endDate,
     page: pagination.page,
@@ -579,13 +585,14 @@ export default function DashboardPage() {
       consultantFilter,
       testDriveFilter,
       uploaderFilter,
+      platformFilter,
       startDate,
       endDate,
       page: pagination.page,
       limit: pagination.limit,
       total: pagination.total,
     };
-  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, startDate, endDate, pagination.page, pagination.limit, pagination.total]);
+  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, pagination.page, pagination.limit, pagination.total]);
 
   useEffect(() => {
     fetchLeads();
@@ -611,6 +618,7 @@ export default function DashboardPage() {
           else if (f.uploaderFilter === "external") checkParams.set("source", "External Upload");
           else if (f.uploaderFilter.startsWith("user:")) checkParams.set("uploader", f.uploaderFilter.replace("user:", ""));
         }
+        if (f.platformFilter) checkParams.set("platform", f.platformFilter);
         if (f.startDate) checkParams.set("startDate", f.startDate);
         if (f.endDate) checkParams.set("endDate", f.endDate);
 
@@ -1024,14 +1032,18 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ [field]: dateStr || null }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast("Follow-up date updated");
+        if (data.lead) {
+          setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, ...data.lead } : l));
+        }
       } else {
-        showToast("Failed to update date", "error");
-        setLeads(prevLeads);
+        showToast(data.error || data.details || "Failed to update date", "error");
+        setLeads(prevLeads.map(l => (l.id === lead.id && data.handledBy) ? { ...l, handledBy: data.handledBy } : l));
       }
-    } catch {
-      showToast("Failed to update date", "error");
+    } catch (err: any) {
+      showToast(err.message || "Failed to update date", "error");
       setLeads(prevLeads);
     } finally {
       stopUpdating();
@@ -1054,7 +1066,8 @@ export default function DashboardPage() {
     prefetchCache.current = {}; // Clear stale cache
 
     // 1. Optimistically update leads list in table immediately
-    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatus } : l));
+    const optimisticHandledBy = (normNew === 'not_contacted') ? null : (lead.handledBy || username || null);
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatus, handledBy: optimisticHandledBy } : l));
 
     // 2. Optimistically update stats counters immediately!
     setStats(prev => {
@@ -1078,17 +1091,20 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast(`Status updated to ${formatStatusLabel(newStatus)}`);
-        // KEEP the optimistic change! Do NOT revert!
+        if (data.lead) {
+          setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, ...data.lead } : l));
+        }
       } else {
-        showToast("Failed to update status", "error");
-        // REVERT back if failed!
-        setLeads(prevLeads);
+        showToast(data.error || data.details || "Failed to update status", "error");
+        // REVERT back if failed, but immediately reflect locked handler
+        setLeads(prevLeads.map(l => (l.id === lead.id && data.handledBy) ? { ...l, handledBy: data.handledBy } : l));
         setStats(prevStats);
       }
-    } catch {
-      showToast("Failed to update status", "error");
+    } catch (err: any) {
+      showToast(err.message || "Failed to update status", "error");
       // REVERT back if failed!
       setLeads(prevLeads);
       setStats(prevStats);
@@ -1099,7 +1115,7 @@ export default function DashboardPage() {
 
   const handleAddRemark = async () => {
     if (!remarkModal) return;
-    const isPending = remarkModal.status === "pending" || remarkModal.status === "not_contacted" || remarkModal.status === "created";
+    const isPending = remarkModal.status === "not_contacted" || remarkModal.status === "created";
     setRemarkLoading(true);
 
     const prevLeads = [...leads];
@@ -1113,18 +1129,15 @@ export default function DashboardPage() {
     setLeads(prev => prev.map(l => l.id === remarkModal.id ? {
       ...l,
       remark: remarkText.trim(),
-      status: isPending ? "live" : l.status
+      status: isPending ? "pending" : l.status,
+      handledBy: l.handledBy || username || null,
     } : l));
 
     if (isPending) {
       setStats(prev => {
         const updated = { ...prev };
-        if (remarkModal.status === "not_contacted" || remarkModal.status === "created") {
-          updated.notContacted = Math.max(0, (updated.notContacted ?? 0) - 1);
-        } else if (remarkModal.status === "pending") {
-          updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
-        }
-        updated.live = (updated.live ?? 0) + 1;
+        updated.notContacted = Math.max(0, (updated.notContacted ?? 0) - 1);
+        updated.pending = (updated.pending ?? 0) + 1;
         return updated;
       });
     }
@@ -1135,16 +1148,18 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ remark: remarkText.trim() }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         showToast("Remark added successfully");
         setRemarkModal(null);
         setRemarkText("");
-        // KEEP the optimistic change!
+        if (data.lead) {
+          setLeads(prev => prev.map(l => l.id === remarkModal.id ? { ...l, ...data.lead } : l));
+        }
       } else {
-        const data = await res.json();
-        showToast(data.error || "Failed to add remark", "error");
-        // REVERT back on failure!
-        setLeads(prevLeads);
+        showToast(data.error || data.details || "Failed to add remark", "error");
+        // REVERT back on failure, but immediately reflect locked handler
+        setLeads(prevLeads.map(l => (l.id === remarkModal.id && data.handledBy) ? { ...l, handledBy: data.handledBy } : l));
         setStats(prevStats);
       }
     } catch {
@@ -1172,10 +1187,10 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assignedConsultant: value }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showToast(`Failed to update consultant: ${data.details || data.error || 'Unknown error'}`, "error");
-        setLeads(prevLeads);
+        showToast(data.error || data.details || "Failed to update consultant", "error");
+        setLeads(prevLeads.map(l => (l.id === lead.id && data.handledBy) ? { ...l, handledBy: data.handledBy } : l));
       } else if (data.lead) {
         setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, ...data.lead } : l));
       }
@@ -1201,10 +1216,10 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ testDrive: value }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showToast(`Failed to update test drive: ${data.details || data.error || 'Unknown error'}`, "error");
-        setLeads(prevLeads);
+        showToast(data.error || data.details || "Failed to update test drive", "error");
+        setLeads(prevLeads.map(l => (l.id === lead.id && data.handledBy) ? { ...l, handledBy: data.handledBy } : l));
       } else if (data.lead) {
         setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, ...data.lead } : l));
       }
@@ -1596,6 +1611,26 @@ export default function DashboardPage() {
           }}
         />
 
+        {/* Platform Multi-Select Filter */}
+        <MultiSelectDropdown
+          label="Platform"
+          allLabel="All Platforms"
+          value={platformFilter}
+          options={[
+            {
+              group: "Meta Ads",
+              options: [
+                { label: "Facebook", value: "Fb" },
+                { label: "Instagram", value: "Ig" },
+              ],
+            },
+          ]}
+          onChange={(newVal) => {
+            setPlatformFilter(newVal);
+            setPagination((p) => ({ ...p, page: 1 }));
+          }}
+        />
+
         {/* Date Filter Quick Pills / Custom Modal Trigger */}
         <button
           type="button"
@@ -1625,7 +1660,7 @@ export default function DashboardPage() {
         </button>
 
         {/* Clear Date Filter Chip */}
-        {(searchInput || search || statusFilter || branchFilter || consultantFilter || testDriveFilter || uploaderFilter || startDate || endDate) && (
+        {(searchInput || search || statusFilter || branchFilter || consultantFilter || testDriveFilter || uploaderFilter || platformFilter || startDate || endDate) && (
           <button
             className="btn btn-ghost"
             onClick={() => {
@@ -1636,6 +1671,7 @@ export default function DashboardPage() {
               setConsultantFilter("");
               setTestDriveFilter("");
               setUploaderFilter("");
+              setPlatformFilter("");
               setStartDate("");
               setEndDate("");
               setPagination(p => ({ ...p, page: 1 }));
@@ -1698,172 +1734,243 @@ export default function DashboardPage() {
               <tbody>
                 {displayedLeads.length === 0 ? (
                   <tr>
-                    <td colSpan={10} style={{ textAlign: "center", padding: "40px" }}>
+                    <td colSpan={13} style={{ textAlign: "center", padding: "40px" }}>
                       No leads found.
                     </td>
                   </tr>
                 ) : (
-                  displayedLeads.map((lead: Lead) => (
-                    <tr key={lead.id}>
-                      <td style={{ fontWeight: 600 }}>{lead.name}</td>
-                      <td style={{ fontFamily: "monospace" }}>{parsePhoneNumber(lead.phone)}</td>
-                      <td>{lead.city || "—"}</td>
-                      <td>{lead.adname || "—"}</td>
-                      <td>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "max-content", maxWidth: "100%" }}>
-                          {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
-                            <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap", display: "inline-block" }}>
-                              {b}
-                            </span>
-                          )) : "—"}
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
-                            <input
-                              type="date"
-                              value={toISTDateString(lead.followUpDate1)}
-                              title={`Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'No date set'}`}
-                              onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
-                              className="status-select"
-                              style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
-                            />
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>2.</span>
-                            <input
-                              type="date"
-                              value={toISTDateString(lead.followUpDate2)}
-                              title={`Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'No date set'}`}
-                              onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
-                              className="status-select"
-                              style={{ border: "1px solid var(--border)", background: "transparent", cursor: "pointer", padding: "2px 6px", fontSize: "13px" }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ cursor: "pointer" }} title={getFullDateTooltip(lead.createdAt)}>
-                        {formatDate(lead.createdAt)}
-                      </td>
-                      <td>
-                        <select
-                          className={`status-select ${(lead.status === "not_contacted" || lead.status === "created") ? "status-not_contacted" :
-                            lead.status === "pending" ? "status-pending" :
-                              (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
-                            }`}
-                          value={lead.status === 'created' ? 'not_contacted' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
-                          onChange={(e) => handleStatusChange(lead, e.target.value)}
-                          title={`Status: ${formatStatusLabel(lead.status)}`}
-                        >
-                          <option value="not_contacted">Not Contacted</option>
-                          <option value="pending">Contacted</option>
-                          <option value="live">Completed</option>
-                          <option value="lost">Lost</option>
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          className={`status-select ${
-                            (lead.testDrive === "Scheduled" || lead.testDrive === "Yes")
-                              ? "td-scheduled"
-                              : lead.testDrive === "Completed"
-                              ? "td-completed"
-                              : lead.testDrive === "Cancelled"
-                              ? "td-cancelled"
-                              : "td-not_scheduled"
-                          }`}
-                          style={{ padding: "4px" }}
-                          value={
-                            lead.testDrive === "Yes"
-                              ? "Scheduled"
-                              : lead.testDrive === "No"
-                              ? "Not Scheduled"
-                              : lead.testDrive || "Not Scheduled"
-                          }
-                          onChange={(e) => handleTestDriveUpdate(lead, e.target.value)}
-                        >
-                          <option value="Not Scheduled">Not Scheduled</option>
-                          <option value="Scheduled">Scheduled</option>
-                          <option value="Completed">Completed</option>
-                          <option value="Cancelled">Cancelled</option>
-                        </select>
-                      </td>
-                      <td>
-                        <select
-                          className="status-select"
-                          style={{ padding: "4px" }}
-                          value={lead.assignedConsultant || ""}
-                          onChange={(e) => handleAssignedConsultantUpdate(lead, e.target.value)}
-                        >
-                          <option value="">Unassigned</option>
-                          {getConsultantGroupsForLead(lead).map((group) => (
-                            <optgroup key={group.branch} label={group.branch}>
-                              {group.consultants.map((c) => (
-                                <option key={`${group.branch}-${c.id}-${c.name}`} value={c.name}>
-                                  {c.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        {(() => {
-                          let plat = lead.platform && !/^\d{4}-\d{2}-\d{2}$/.test(lead.platform) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(lead.platform)
-                            ? lead.platform.trim()
-                            : "Unknown";
+                  displayedLeads.map((lead: Lead) => {
+                    const isLeadLocked = Boolean(
+                      userRole !== "ADMIN" &&
+                      userRole !== "SUPERADMIN" &&
+                      !isSuperAdmin &&
+                      lead.handledBy &&
+                      username &&
+                      lead.handledBy.trim().toLowerCase() !== username.trim().toLowerCase()
+                    );
 
-                          if (plat && plat.toLowerCase() !== "unknown") {
-                            plat = plat.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-                          } else if (plat.toLowerCase() === "unknown") {
-                            plat = "Unknown";
-                          }
-
-                          const uploader = lead.uploadedBy?.username;
-
-                          return (
-                            <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
-                              <span>{plat}</span>
-                              {uploader && (
-                                <span style={{ color: "var(--text-muted)", marginLeft: 5, fontSize: 12, fontWeight: 600 }}>
-                                  ({uploader})
-                                </span>
-                              )}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                      <td className="remark-cell">
-                        {lead.remark ? (
-                          <span className="remark-text" title={lead.remark} style={{ whiteSpace: "normal", wordBreak: "break-word", display: "block", maxWidth: "250px" }}>{lead.remark}</span>
-                        ) : (
-                          <span style={{ color: "var(--text-muted)" }}>—</span>
-                        )}
-                      </td>
-                      <td>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <button className="add-remark-btn" onClick={() => openRemarkModal(lead)}>
-                            {lead.remark ? "Edit" : "Add"} Remark
-                          </button>
-                          {isSuperAdmin && (
-                            <button
-                              className="btn btn-ghost"
-                              style={{ color: "#ef4444", padding: "6px 8px", borderRadius: 6 }}
-                              onClick={() => openDeleteModal(lead)}
-                              title="Delete lead (Superadmin only)"
-                            >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15, display: "block" }}>
-                                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              </svg>
-                            </button>
+                    return (
+                      <tr key={lead.id} style={isLeadLocked ? { background: "rgba(241, 245, 249, 0.35)" } : undefined}>
+                        <td style={{ fontWeight: 600 }}>
+                          <div>{lead.name}</div>
+                          {lead.handledBy && (
+                            <div style={{ marginTop: 4 }}>
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  padding: "1px 7px",
+                                  borderRadius: "10px",
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  background: isLeadLocked ? "rgba(239, 68, 68, 0.08)" : "rgba(37, 99, 235, 0.08)",
+                                  color: isLeadLocked ? "#dc2626" : "#2563eb",
+                                  border: `1px solid ${isLeadLocked ? "rgba(239, 68, 68, 0.2)" : "rgba(37, 99, 235, 0.2)"}`,
+                                  whiteSpace: "nowrap",
+                                }}
+                                title={isLeadLocked ? `Locked by ${lead.handledBy} (Read only)` : `Handled by ${lead.handledBy}`}
+                              >
+                                {isLeadLocked ? (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 10, height: 10 }}>
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                  </svg>
+                                ) : (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 10, height: 10 }}>
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                    <circle cx="12" cy="7" r="4"></circle>
+                                  </svg>
+                                )}
+                                {isLeadLocked ? `Locked: ${lead.handledBy}` : `Handled by ${lead.handledBy}`}
+                              </span>
+                            </div>
                           )}
-                        </div>
-                      </td>
+                        </td>
+                        <td style={{ fontFamily: "monospace" }}>{parsePhoneNumber(lead.phone)}</td>
+                        <td>{lead.city || "—"}</td>
+                        <td title={lead.adname || undefined} style={{ maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {lead.adname || "—"}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "4px", width: "max-content", maxWidth: "100%" }}>
+                            {lead.branch ? parseBranches(lead.branch).map((b, idx) => (
+                              <span key={idx} style={{ background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 600, whiteSpace: "nowrap", display: "inline-block" }}>
+                                {b}
+                              </span>
+                            )) : "—"}
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
+                              <input
+                                type="date"
+                                value={toISTDateString(lead.followUpDate1)}
+                                title={isLeadLocked ? `Locked by ${lead.handledBy}` : `Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'No date set'}`}
+                                onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
+                                disabled={isLeadLocked}
+                                className="status-select"
+                                style={{ border: "1px solid var(--border)", background: "transparent", cursor: isLeadLocked ? "not-allowed" : "pointer", opacity: isLeadLocked ? 0.6 : 1, padding: "2px 6px", fontSize: "13px" }}
+                              />
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>2.</span>
+                              <input
+                                type="date"
+                                value={toISTDateString(lead.followUpDate2)}
+                                title={isLeadLocked ? `Locked by ${lead.handledBy}` : `Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'No date set'}`}
+                                onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
+                                disabled={isLeadLocked}
+                                className="status-select"
+                                style={{ border: "1px solid var(--border)", background: "transparent", cursor: isLeadLocked ? "not-allowed" : "pointer", opacity: isLeadLocked ? 0.6 : 1, padding: "2px 6px", fontSize: "13px" }}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ cursor: "pointer" }} title={getFullDateTooltip(lead.createdAt)}>
+                          {formatDate(lead.createdAt)}
+                        </td>
+                        <td>
+                          <select
+                            className={`status-select ${(lead.status === "not_contacted" || lead.status === "created") ? "status-not_contacted" :
+                              lead.status === "pending" ? "status-pending" :
+                                (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
+                              }`}
+                            value={lead.status === 'created' ? 'not_contacted' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
+                            onChange={(e) => handleStatusChange(lead, e.target.value)}
+                            disabled={isLeadLocked}
+                            style={isLeadLocked ? { opacity: 0.65, cursor: "not-allowed" } : undefined}
+                            title={isLeadLocked ? `Locked by ${lead.handledBy}` : `Status: ${formatStatusLabel(lead.status)}`}
+                          >
+                            <option value="not_contacted">Not Contacted</option>
+                            <option value="pending">Contacted</option>
+                            <option value="live">Completed</option>
+                            <option value="lost">Lost</option>
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            className={`status-select ${
+                              (lead.testDrive === "Scheduled" || lead.testDrive === "Yes")
+                                ? "td-scheduled"
+                                : lead.testDrive === "Completed"
+                                ? "td-completed"
+                                : lead.testDrive === "Cancelled"
+                                ? "td-cancelled"
+                                : "td-not_scheduled"
+                            }`}
+                            style={{ padding: "4px", ...(isLeadLocked ? { opacity: 0.65, cursor: "not-allowed" } : {}) }}
+                            value={
+                              lead.testDrive === "Yes"
+                                ? "Scheduled"
+                                : lead.testDrive === "No"
+                                ? "Not Scheduled"
+                                : lead.testDrive || "Not Scheduled"
+                            }
+                            onChange={(e) => handleTestDriveUpdate(lead, e.target.value)}
+                            disabled={isLeadLocked}
+                            title={isLeadLocked ? `Locked by ${lead.handledBy}` : undefined}
+                          >
+                            <option value="Not Scheduled">Not Scheduled</option>
+                            <option value="Scheduled">Scheduled</option>
+                            <option value="Completed">Completed</option>
+                            <option value="Cancelled">Cancelled</option>
+                          </select>
+                        </td>
+                        <td>
+                          <select
+                            className="status-select"
+                            style={{ padding: "4px", ...(isLeadLocked ? { opacity: 0.65, cursor: "not-allowed" } : {}) }}
+                            value={lead.assignedConsultant || ""}
+                            onChange={(e) => handleAssignedConsultantUpdate(lead, e.target.value)}
+                            disabled={isLeadLocked}
+                            title={isLeadLocked ? `Locked by ${lead.handledBy}` : undefined}
+                          >
+                            <option value="">Unassigned</option>
+                            {getConsultantGroupsForLead(lead).map((group) => (
+                              <optgroup key={group.branch} label={group.branch}>
+                                {group.consultants.map((c) => (
+                                  <option key={`${group.branch}-${c.id}-${c.name}`} value={c.name}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          {(() => {
+                            let plat = lead.platform && !/^\d{4}-\d{2}-\d{2}$/.test(lead.platform) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(lead.platform)
+                              ? lead.platform.trim()
+                              : "Unknown";
 
-                    </tr>
-                  ))
+                            // Map DB values to friendly display names
+                            if (plat === 'Fb') plat = 'Facebook';
+                            else if (plat === 'Ig') plat = 'Instagram';
+                            else if (plat && plat.toLowerCase() !== "unknown") {
+                              plat = plat.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                            } else {
+                              plat = "Unknown";
+                            }
+
+                            const uploader = lead.uploadedBy?.username;
+
+                            return (
+                              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
+                                <span>{plat}</span>
+                                {uploader && (
+                                  <span style={{ color: "var(--text-muted)", marginLeft: 5, fontSize: 12, fontWeight: 600 }}>
+                                    ({uploader})
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td className="remark-cell">
+                          {lead.remark ? (
+                            <span className="remark-text" title={lead.remark} style={{ whiteSpace: "normal", wordBreak: "break-word", display: "block", maxWidth: "250px" }}>{lead.remark}</span>
+                          ) : (
+                            <span style={{ color: "var(--text-muted)" }}>—</span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <button
+                              className="add-remark-btn"
+                              onClick={() => {
+                                if (isLeadLocked) {
+                                  showToast(`This lead is currently handled by "${lead.handledBy}". You cannot modify this lead unless "${lead.handledBy}" changes its status back to Not Contacted.`, "error");
+                                  return;
+                                }
+                                openRemarkModal(lead);
+                              }}
+                              disabled={isLeadLocked}
+                              style={isLeadLocked ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                              title={isLeadLocked ? `Locked by ${lead.handledBy}` : undefined}
+                            >
+                              {lead.remark ? "Edit" : "Add"} Remark
+                            </button>
+                            {isSuperAdmin && (
+                              <button
+                                className="btn btn-ghost"
+                                style={{ color: "#ef4444", padding: "6px 8px", borderRadius: 6 }}
+                                onClick={() => openDeleteModal(lead)}
+                                title="Delete lead (Superadmin only)"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 15, height: 15, display: "block" }}>
+                                  <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1903,7 +2010,7 @@ export default function DashboardPage() {
                   {remarkModal.uploadedAt && ` (${new Date(remarkModal.uploadedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })})`}
                 </span>
               )}
-              {(remarkModal.status === "pending" || remarkModal.status === "not_contacted" || remarkModal.status === "created") && <><br /><small style={{ color: "var(--status-created)" }}>Adding a remark will automatically change status to Completed</small></>}
+              {(remarkModal.status === "not_contacted" || remarkModal.status === "created") && <><br /><small style={{ color: "var(--status-created)" }}>Adding a remark will automatically change status to Contacted</small></>}
             </p>
             <textarea
               value={remarkText}

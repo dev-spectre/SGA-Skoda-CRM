@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 
 interface UserAccount {
   id: number;
@@ -330,21 +331,28 @@ export default function AccountsPage() {
         >
           User Accounts
         </button>
-        <button
-          onClick={() => handleTabChange("activity")}
+        <Link
+          href="/activity"
           style={{
             padding: "12px 16px",
             background: "none",
             border: "none",
-            borderBottom: activeTab === "activity" ? "2px solid var(--primary)" : "2px solid transparent",
-            color: activeTab === "activity" ? "var(--primary)" : "var(--text-secondary)",
-            fontWeight: activeTab === "activity" ? 700 : 500,
+            borderBottom: "2px solid transparent",
+            color: "var(--text-secondary)",
+            fontWeight: 600,
             cursor: "pointer",
-            fontSize: "15px"
+            fontSize: "15px",
+            textDecoration: "none",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "8px",
           }}
         >
-          User Activity
-        </button>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          User Activity Tracker
+        </Link>
       </div>
 
       {activeTab === "users" ? (

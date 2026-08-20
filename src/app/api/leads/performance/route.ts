@@ -11,7 +11,6 @@ export async function GET() {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-
     // High performance query: Fetch registered consultants and DB-grouped lead metrics
     const [registeredConsultants, leadGroups] = await Promise.all([
       prisma.consultant.findMany({
@@ -23,13 +22,9 @@ export async function GET() {
       }),
     ]);
 
-    // Map of consultant name (case-insensitive key) to branch
-    const branchMap = new Map<string, string>();
-    registeredConsultants.forEach((c: any) => {
-      branchMap.set(c.name.toLowerCase(), c.branch);
-    });
-
-    const consultantStats = new Map<string, {
+    // Key by consultant DB id — guaranteed unique even across same-name consultants
+    const consultantStats = new Map<number, {
+      id: number;
       consultant: string;
       branch: string;
       total: number;
@@ -41,9 +36,10 @@ export async function GET() {
       testDriveNo: number;
     }>();
 
-    // Pre-initialize registered consultants
+    // Pre-initialize all registered consultants
     registeredConsultants.forEach((c: any) => {
-      consultantStats.set(c.name.toLowerCase(), {
+      consultantStats.set(c.id, {
+        id: c.id,
         consultant: c.name,
         branch: c.branch,
         total: 0,
@@ -56,41 +52,66 @@ export async function GET() {
       });
     });
 
+    // Build lookup: name (lowercase) -> array of consultant ids
+    // Leads only store consultant name (not branch), so we need this reverse mapping.
+    const nameToIds = new Map<string, number[]>();
+    for (const c of registeredConsultants) {
+      const nameLower = c.name.toLowerCase();
+      if (!nameToIds.has(nameLower)) nameToIds.set(nameLower, []);
+      nameToIds.get(nameLower)!.push(c.id);
+    }
 
-    // Process aggregated groups (strictly for registered consultants)
+    // Process aggregated groups
     for (const group of leadGroups) {
       if (!group.assignedConsultant || group.assignedConsultant.trim() === '') continue;
-      const key = group.assignedConsultant.trim().toLowerCase();
+      const nameLower = group.assignedConsultant.trim().toLowerCase();
 
-      // Only include consultants who exist in Manage Consultants
-      if (!consultantStats.has(key)) continue;
+      const ids = nameToIds.get(nameLower);
+      if (!ids || ids.length === 0) continue; // not a registered consultant
 
-      const stats = consultantStats.get(key)!;
       const count = group._count.id;
-      stats.total += count;
 
-      const status = group.status;
-      if (status === 'not_contacted' || status === 'created') {
-        stats.notContacted += count;
-      } else if (status === 'pending') {
-        stats.pending += count;
-      } else if (status === 'live' || status === 'closed_successful') {
-        stats.live += count;
-      } else if (status === 'lost' || status === 'closed_unsuccessful') {
-        stats.lost += count;
-      }
+      // If the name is unique across branches, attribute directly.
+      // If shared across multiple branches, split evenly.
+      const splitCount = count / ids.length;
 
-      const td = group.testDrive;
-      if (td === 'Scheduled' || td === 'Completed' || td === 'Yes') {
-        stats.testDriveYes += count;
-      } else {
-        stats.testDriveNo += count;
+      for (const id of ids) {
+        const stats = consultantStats.get(id)!;
+        stats.total += splitCount;
+
+        const status = group.status;
+        if (status === 'not_contacted' || status === 'created') {
+          stats.notContacted += splitCount;
+        } else if (status === 'pending') {
+          stats.pending += splitCount;
+        } else if (status === 'live' || status === 'closed_successful') {
+          stats.live += splitCount;
+        } else if (status === 'lost' || status === 'closed_unsuccessful') {
+          stats.lost += splitCount;
+        }
+
+        const td = group.testDrive;
+        if (td === 'Scheduled' || td === 'Completed' || td === 'Yes') {
+          stats.testDriveYes += splitCount;
+        } else {
+          stats.testDriveNo += splitCount;
+        }
       }
     }
 
-    const performanceData = Array.from(consultantStats.values()).sort((a, b) => {
-      return b.total - a.total;
-    });
+    // Round fractional counts to integers and sort by total desc
+    const performanceData = Array.from(consultantStats.values())
+      .map(s => ({
+        ...s,
+        total: Math.round(s.total),
+        notContacted: Math.round(s.notContacted),
+        pending: Math.round(s.pending),
+        live: Math.round(s.live),
+        lost: Math.round(s.lost),
+        testDriveYes: Math.round(s.testDriveYes),
+        testDriveNo: Math.round(s.testDriveNo),
+      }))
+      .sort((a, b) => b.total - a.total);
 
     return NextResponse.json({ performance: performanceData });
 

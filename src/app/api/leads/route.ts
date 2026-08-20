@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
+import { resolveLeadHandler } from '@/lib/activity';
 
 export async function GET(request: NextRequest) {
   try {
@@ -123,9 +124,28 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Apply platform filter only if a platform is specified (non-admin or explicit filter)
+    // Apply platform filter — supports comma-separated multi-select values and label→DB mapping
     if (platform) {
-      statsWhere.platform = platform;
+      const platformTokens = platform.split(',').map((p: string) => p.trim()).filter(Boolean);
+      if (platformTokens.length > 0) {
+        // Map display labels to DB values
+        const mapPlatformValue = (val: string): string[] => {
+          const lower = val.toLowerCase();
+          if (lower === 'facebook' || lower === 'fb') return ['Fb'];
+          if (lower === 'instagram' || lower === 'ig') return ['Ig'];
+          if (lower === 'meta ads') return ['Fb', 'Ig'];
+          return [val];
+        };
+        const dbPlatforms = Array.from(new Set(platformTokens.flatMap(mapPlatformValue)));
+        if (dbPlatforms.length === 1) {
+          statsWhere.platform = dbPlatforms[0];
+        } else {
+          statsWhere.AND = [
+            ...(statsWhere.AND || []),
+            { platform: { in: dbPlatforms } }
+          ];
+        }
+      }
     }
 
     if (consultant) {
@@ -307,11 +327,72 @@ export async function GET(request: NextRequest) {
         lostLeads += count;
       }
     });
-    
+
     const maxUpdatedAt = maxAggregate._max.updatedAt || null;
+    const superUsername = (process.env.SUPERADMIN_USERNAME || 'sudo').trim().toLowerCase();
+    const leadIds = leads.map((l) => l.id);
+
+    const [staffUsers, recentActivities] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          AND: [
+            { username: { notIn: [superUsername, 'sudo'], mode: 'insensitive' } },
+            { role: { not: 'SUPERADMIN' } },
+          ],
+        },
+        select: { id: true, username: true },
+      }),
+      leadIds.length > 0
+        ? prisma.leadActivity.findMany({
+            where: {
+              leadId: { in: leadIds },
+              username: {
+                notIn: [superUsername, 'sudo'],
+                mode: 'insensitive',
+              },
+            },
+            orderBy: {
+              createdAt: 'asc',
+            },
+            select: {
+              id: true,
+              leadId: true,
+              userId: true,
+              username: true,
+              action: true,
+              oldValue: true,
+              newValue: true,
+              createdAt: true,
+            },
+          })
+        : [],
+    ]);
+
+    const staffUsernames = new Set<string>();
+    const staffUserById = new Map<number, string>();
+    for (const u of staffUsers) {
+      staffUsernames.add(u.username.trim().toLowerCase());
+      staffUserById.set(u.id, u.username);
+    }
+
+    const activitiesByLead = new Map<number, typeof recentActivities>();
+    for (const act of recentActivities) {
+      const list = activitiesByLead.get(act.leadId) || [];
+      list.push(act);
+      activitiesByLead.set(act.leadId, list);
+    }
+
+    const enrichedLeads = leads.map((l) => {
+      const leadActs = activitiesByLead.get(l.id) || [];
+      const handler = resolveLeadHandler(l, leadActs, staffUsernames, staffUserById);
+      return {
+        ...l,
+        handledBy: handler,
+      };
+    });
 
     return NextResponse.json({
-      leads,
+      leads: enrichedLeads,
       maxUpdatedAt: maxUpdatedAt ? maxUpdatedAt.toISOString() : null,
       userRole: currentUser?.role || 'USER',
       assignedBranch: currentUser?.assignedBranch || null,

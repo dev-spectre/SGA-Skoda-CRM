@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { getSheetData } from '@/lib/google';
 import { parsePhoneNumber, sanitizeField, parseSheetStatus } from '@/lib/utils';
+import { isSuperAdminUser } from '@/lib/activity';
 
 export async function POST(request: NextRequest) {
   try {
@@ -201,6 +202,36 @@ export async function POST(request: NextRequest) {
         await prisma.lead.createMany({
           data: chunk,
         });
+      }
+
+      // Log upload activity for created leads (skips superadmin)
+      if (currentUser && !isSuperAdminUser(currentUser)) {
+        try {
+          const createdFingerprints = toCreate.map(c => c.fingerprint).filter(Boolean);
+          const insertedLeads = await prisma.lead.findMany({
+            where: { fingerprint: { in: createdFingerprints } },
+            select: { id: true, name: true, phone: true }
+          });
+
+          if (insertedLeads.length > 0) {
+            const activityData = insertedLeads.map(lead => ({
+              leadId: lead.id,
+              userId: uploaderDbId,
+              username: currentUser.username,
+              action: 'EXTERNAL_UPLOAD',
+              oldValue: null,
+              newValue: 'External Upload',
+            }));
+
+            for (let i = 0; i < activityData.length; i += chunkSize) {
+              await prisma.leadActivity.createMany({
+                data: activityData.slice(i, i + chunkSize),
+              });
+            }
+          }
+        } catch (actErr) {
+          console.error('Failed to log batch upload activities:', actErr);
+        }
       }
     }
 

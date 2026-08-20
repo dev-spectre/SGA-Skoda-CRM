@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { findAndWriteToSheetRow } from '@/lib/google';
+import { getCurrentUser } from '@/lib/auth';
+import { logLeadDiff, checkLeadLockForUser, resolveLeadHandler } from '@/lib/activity';
 
 export async function POST(
   request: NextRequest,
@@ -20,13 +22,36 @@ export async function POST(
     if (!lead) {
       return NextResponse.json({ error: 'Lead not found' }, { status: 404 });
     }
+
+    const currentUser = await getCurrentUser();
+
+    // Server-level and DB-level lock enforcement
+    const lockCheck = await checkLeadLockForUser(leadId, currentUser);
+    if (lockCheck.isLocked) {
+      return NextResponse.json(
+        { error: lockCheck.error || 'This lead is locked by another user', handledBy: lockCheck.handledBy },
+        { status: 403 }
+      );
+    }
     
-    const newStatus = (lead.status === 'created' || lead.status === 'pending' || lead.status === 'not_contacted') ? 'live' : lead.status;
+    const newStatus = (lead.status === 'created' || lead.status === 'not_contacted') ? 'pending' : lead.status;
+    const trimmedRemark = remark.trim();
     
     const updatedLead = await prisma.lead.update({
       where: { id: leadId },
       data: {
-        remark: remark.trim(),
+        remark: trimmedRemark,
+        status: newStatus,
+      },
+    });
+
+    // Log activity diff (skips superadmin automatically)
+    await logLeadDiff({
+      leadId,
+      user: currentUser,
+      previousLead: lead,
+      updates: {
+        remark: trimmedRemark,
         status: newStatus,
       },
     });
@@ -45,7 +70,7 @@ export async function POST(
               : { remark: 7, status: 8 };
             
             const updates: { col: number; value: string }[] = [];
-            if (mapping.remark !== undefined) updates.push({ col: mapping.remark, value: remark.trim() });
+            if (mapping.remark !== undefined) updates.push({ col: mapping.remark, value: trimmedRemark });
             if (mapping.status !== undefined) updates.push({ col: mapping.status, value: newStatus });
 
             if (updates.length > 0) {
@@ -57,8 +82,53 @@ export async function POST(
         }
       })();
     }
-    
-    return NextResponse.json({ lead: updatedLead });
+
+    // Compute updated handler to return to client
+    const superUsername = (process.env.SUPERADMIN_USERNAME || 'sudo').trim().toLowerCase();
+    const [staffUsers, leadActivities] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          AND: [
+            { username: { notIn: [superUsername, 'sudo'], mode: 'insensitive' } },
+            { role: { not: 'SUPERADMIN' } },
+          ],
+        },
+        select: { id: true, username: true },
+      }),
+      prisma.leadActivity.findMany({
+        where: {
+          leadId,
+          username: { notIn: [superUsername, 'sudo'], mode: 'insensitive' },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          leadId: true,
+          userId: true,
+          username: true,
+          action: true,
+          oldValue: true,
+          newValue: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const staffUsernames = new Set<string>();
+    const staffUserById = new Map<number, string>();
+    for (const u of staffUsers) {
+      staffUsernames.add(u.username.trim().toLowerCase());
+      staffUserById.set(u.id, u.username);
+    }
+
+    const currentHandler = resolveLeadHandler(updatedLead, leadActivities, staffUsernames, staffUserById);
+
+    return NextResponse.json({
+      lead: {
+        ...updatedLead,
+        handledBy: currentHandler,
+      },
+    });
   } catch (error) {
     console.error('Add remark error:', error);
     return NextResponse.json({ error: 'Failed to add remark' }, { status: 500 });

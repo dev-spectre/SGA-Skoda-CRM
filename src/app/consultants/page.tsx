@@ -6,6 +6,7 @@ import BranchConsultantPicker from "@/components/BranchConsultantPicker";
 
 
 interface PerformanceStat {
+  id: number;
   consultant: string;
   branch?: string;
   total: number;
@@ -773,7 +774,7 @@ export default function ConsultantsPage() {
                       const tdInfo = formatTestDriveRate(stat.testDriveYes, stat.total);
 
                       return (
-                        <tr key={stat.consultant} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <tr key={stat.id} style={{ borderBottom: "1px solid var(--border)" }}>
                           <td style={{ padding: "14px" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               <div

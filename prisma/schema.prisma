@@ -34,6 +34,7 @@ model Lead {
   updatedAt  DateTime  @updatedAt
 
   hiddenBy   HiddenLead[]
+  activities LeadActivity[]
 
   @@index([createdAt])
   @@index([updatedAt])
@@ -55,6 +56,24 @@ model User {
 
   hiddenLeads    HiddenLead[]
   uploadedLeads  Lead[]        @relation(name: "UserUploadedLeads")
+  activities     LeadActivity[]
+}
+
+model LeadActivity {
+  id         Int      @id @default(autoincrement())
+  leadId     Int
+  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId     Int?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  username   String
+  action     String   // e.g. "STATUS_CHANGE", "REMARK_UPDATE", "FOLLOWUP_DATE_1", "FOLLOWUP_DATE_2", "CONSULTANT_ASSIGN", "TEST_DRIVE", "EXTERNAL_UPLOAD"
+  oldValue   String?
+  newValue   String?
+  createdAt  DateTime @default(now())
+
+  @@index([leadId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model HiddenLead {
@@ -108,4 +127,3 @@ model Consultant {
   @@unique([name, branch])
   @@index([branch])
 }
-
