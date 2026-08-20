@@ -48,6 +48,8 @@ export default function ConsultantsPage() {
   const [searchPerf, setSearchPerf] = useState("");
   const [branchFilterPerf, setBranchFilterPerf] = useState("");
   const [consultantFilterPerf, setConsultantFilterPerf] = useState("");
+  const [sortFieldPerf, setSortFieldPerf] = useState<string>("testDriveRate");
+  const [sortOrderPerf, setSortOrderPerf] = useState<"asc" | "desc">("desc");
 
   // Filters for Manage tab
   const [searchManage, setSearchManage] = useState("");
@@ -134,7 +136,7 @@ export default function ConsultantsPage() {
       const meData = await meRes.json();
       if (meData.user) {
         setUserRole(meData.user.role);
-        if (meData.user.role !== "ADMIN") {
+        if (meData.user.role !== "ADMIN" && meData.user.role !== "SUPERADMIN") {
           setAccessDenied(true);
           setLoading(false);
           return;
@@ -190,6 +192,48 @@ export default function ConsultantsPage() {
       return true;
     });
   }, [stats, registeredConsultantsSet, searchPerf, branchFilterPerf, consultantFilterPerf]);
+
+  const sortedPerformanceStats = useMemo(() => {
+    const list = [...filteredPerformanceStats];
+    list.sort((a, b) => {
+      if (a.consultant === "Unassigned") return 1;
+      if (b.consultant === "Unassigned") return -1;
+
+      let valA: number | string = 0;
+      let valB: number | string = 0;
+
+      if (sortFieldPerf === "testDriveRate") {
+        valA = a.total > 0 ? a.testDriveYes / a.total : 0;
+        valB = b.total > 0 ? b.testDriveYes / b.total : 0;
+      } else if (sortFieldPerf === "total") {
+        valA = a.total;
+        valB = b.total;
+      } else if (sortFieldPerf === "notContacted") {
+        valA = a.notContacted;
+        valB = b.notContacted;
+      } else if (sortFieldPerf === "pending") {
+        valA = a.pending;
+        valB = b.pending;
+      } else if (sortFieldPerf === "live") {
+        valA = a.live;
+        valB = b.live;
+      } else if (sortFieldPerf === "lost") {
+        valA = a.lost;
+        valB = b.lost;
+      } else if (sortFieldPerf === "branch") {
+        valA = (a.branch || "").toLowerCase();
+        valB = (b.branch || "").toLowerCase();
+      } else {
+        valA = a.consultant.toLowerCase();
+        valB = b.consultant.toLowerCase();
+      }
+
+      if (valA < valB) return sortOrderPerf === "asc" ? -1 : 1;
+      if (valA > valB) return sortOrderPerf === "asc" ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [filteredPerformanceStats, sortFieldPerf, sortOrderPerf]);
 
 
 
@@ -368,11 +412,13 @@ export default function ConsultantsPage() {
     }
   };
 
-  const handleViewConsultantLeads = (consultantName: string) => {
+  const handleViewConsultantLeads = (consultantName: string, testDriveOption: string = "") => {
+    const encConsultant = encodeURIComponent(consultantName);
+    const tdParam = `&testDrive=${encodeURIComponent(testDriveOption)}`;
     if (consultantName === "Unassigned") {
-      router.push("/dashboard?consultant=Unassigned&testDrive=Yes");
+      router.push(`/dashboard?consultant=Unassigned${tdParam}`);
     } else {
-      router.push(`/dashboard?consultant=${encodeURIComponent(consultantName)}&testDrive=Yes`);
+      router.push(`/dashboard?consultant=${encConsultant}${tdParam}`);
     }
   };
 
@@ -611,6 +657,33 @@ export default function ConsultantsPage() {
                 />
               </div>
 
+              <div>
+                <select
+                  value={`${sortFieldPerf}-${sortOrderPerf}`}
+                  onChange={(e) => {
+                    const [field, order] = e.target.value.split("-") as [string, "asc" | "desc"];
+                    setSortFieldPerf(field);
+                    setSortOrderPerf(order);
+                  }}
+                  style={{
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: "1.5px solid var(--border)",
+                    fontSize: "13px",
+                    background: "#ffffff",
+                    color: "var(--text-primary)",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="testDriveRate-desc">Sort: Test Drive Rate (High → Low)</option>
+                  <option value="testDriveRate-asc">Sort: Test Drive Rate (Low → High)</option>
+                  <option value="name-asc">Sort: Consultant Name (A → Z)</option>
+                  <option value="total-desc">Sort: Total Leads (High → Low)</option>
+                  <option value="live-desc">Sort: Completed Leads (High → Low)</option>
+                </select>
+              </div>
+
               {(searchPerf || branchFilterPerf || consultantFilterPerf) && (
                 <button
                   className="btn btn-ghost btn-sm"
@@ -633,26 +706,69 @@ export default function ConsultantsPage() {
               <table style={{ minWidth: "100%", textAlign: "left", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid var(--border)" }}>
-                    <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13 }}>Consultant Name</th>
+                    <th
+                      onClick={() => {
+                        setSortFieldPerf("name");
+                        setSortOrderPerf(sortFieldPerf === "name" && sortOrderPerf === "asc" ? "desc" : "asc");
+                      }}
+                      style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer", userSelect: "none" }}
+                    >
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span>Consultant Name</span>
+                        {sortFieldPerf === "name" && <span style={{ fontSize: 11 }}>{sortOrderPerf === "asc" ? "↑" : "↓"}</span>}
+                      </div>
+                    </th>
                     <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13 }}>Assigned Branch</th>
-                    <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13 }}>Total Leads</th>
+                    <th
+                      onClick={() => {
+                        setSortFieldPerf("total");
+                        setSortOrderPerf(sortFieldPerf === "total" && sortOrderPerf === "desc" ? "asc" : "desc");
+                      }}
+                      style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer", userSelect: "none" }}
+                    >
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span>Total Leads</span>
+                        {sortFieldPerf === "total" && <span style={{ fontSize: 11 }}>{sortOrderPerf === "desc" ? "↓" : "↑"}</span>}
+                      </div>
+                    </th>
                     <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, color: "#475569" }}>Not Contacted</th>
                     <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, color: "#b45309" }}>Contacted</th>
                     <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, color: "#047857" }}>Completed</th>
                     <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, color: "#b91c1c" }}>Lost</th>
-                    <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13 }}>Test Drive Rate</th>
+                    <th
+                      onClick={() => {
+                        setSortFieldPerf("testDriveRate");
+                        setSortOrderPerf(sortFieldPerf === "testDriveRate" && sortOrderPerf === "desc" ? "asc" : "desc");
+                      }}
+                      style={{
+                        padding: "12px 14px",
+                        fontWeight: 700,
+                        fontSize: 13,
+                        cursor: "pointer",
+                        userSelect: "none",
+                        color: sortFieldPerf === "testDriveRate" ? "#047857" : "var(--text-primary)",
+                      }}
+                      title="Click to sort by Test Drive Rate"
+                    >
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span>Test Drive Rate</span>
+                        {sortFieldPerf === "testDriveRate" && (
+                          <span style={{ fontSize: 12, fontWeight: 800 }}>{sortOrderPerf === "desc" ? "↓" : "↑"}</span>
+                        )}
+                      </div>
+                    </th>
                     <th style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, textAlign: "right" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPerformanceStats.length === 0 ? (
+                  {sortedPerformanceStats.length === 0 ? (
                     <tr>
                       <td colSpan={9} style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)" }}>
                         No consultant records found matching your filters.
                       </td>
                     </tr>
                   ) : (
-                    filteredPerformanceStats.map((stat) => {
+                    sortedPerformanceStats.map((stat) => {
                       const isUnassigned = stat.consultant === "Unassigned";
                       const tdInfo = formatTestDriveRate(stat.testDriveYes, stat.total);
 
@@ -732,20 +848,69 @@ export default function ConsultantsPage() {
                             </span>
                           </td>
                           <td style={{ padding: "14px", fontSize: 13 }}>
-                            <span style={{ fontWeight: 700, color: stat.testDriveYes > 0 ? "#16a34a" : "var(--text-primary)" }}>
-                              {tdInfo.pctStr}
-                            </span>
-                            <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 6, fontWeight: 500 }}>
-                              {tdInfo.ratioStr}
-                            </span>
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                              <div>
+                                <span style={{ fontWeight: 700, color: stat.testDriveYes > 0 ? "#16a34a" : "var(--text-primary)" }}>
+                                  {tdInfo.pctStr}
+                                </span>
+                                <span style={{ fontSize: 12, color: "var(--text-muted)", marginLeft: 6, fontWeight: 500 }}>
+                                  {tdInfo.ratioStr}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleViewConsultantLeads(stat.consultant, "Scheduled,Completed")}
+                                title="View Scheduled & Completed Test Drives"
+                                style={{
+                                  border: "1px solid rgba(16, 185, 129, 0.3)",
+                                  background: "#ecfdf5",
+                                  color: "#047857",
+                                  borderRadius: "6px",
+                                  padding: "3px 6px",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 4,
+                                  fontSize: "11px",
+                                  fontWeight: 600,
+                                  transition: "all 0.15s ease",
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = "#10b981";
+                                  e.currentTarget.style.color = "#ffffff";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = "#ecfdf5";
+                                  e.currentTarget.style.color = "#047857";
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 13, height: 13 }}>
+                                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </svg>
+                              </button>
+                            </div>
                           </td>
                           <td style={{ padding: "14px", textAlign: "right" }}>
-                            <button
-                              className="btn btn-sm btn-secondary"
-                              onClick={() => handleViewConsultantLeads(stat.consultant)}
-                            >
-                              View Leads
-                            </button>
+                            <div style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                              <button
+                                className="btn btn-sm btn-ghost"
+                                onClick={() => handleViewConsultantLeads(stat.consultant, "Scheduled")}
+                                title="View Scheduled Test Drive Leads"
+                                style={{ fontSize: 12, padding: "5px 10px" }}
+                              >
+                                Scheduled
+                              </button>
+                         
+                              <button
+                                className="btn btn-sm btn-secondary"
+                                onClick={() => handleViewConsultantLeads(stat.consultant, "")}
+                                title="View All Leads for this consultant"
+                                style={{ fontSize: 12, padding: "5px 10px" }}
+                              >
+                                All Leads
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

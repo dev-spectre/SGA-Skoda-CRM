@@ -81,7 +81,18 @@ export async function GET(request: NextRequest) {
             OR: [
               { testDrive: null },
               { testDrive: '' },
-              { testDrive: 'Not Scheduled' }
+              { testDrive: 'Not Scheduled' },
+              { testDrive: 'No' },
+            ]
+          }
+        ];
+      } else if (testDrive === 'Scheduled') {
+        where.AND = [
+          ...(where.AND || []),
+          {
+            OR: [
+              { testDrive: 'Scheduled' },
+              { testDrive: 'Yes' },
             ]
           }
         ];

@@ -5,11 +5,17 @@ import { findDuplicateLeads, executeDeleteDuplicateLeads } from '@/lib/deduplica
 export async function GET() {
   try {
     const currentUser = await getCurrentUser();
-    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    const superUsername = (process.env.SUPERADMIN_USERNAME || 'sudo').toLowerCase();
+    const isSuperAdmin = currentUser && (
+      currentUser.isSuperAdmin ||
+      currentUser.role === 'SUPERADMIN' ||
+      currentUser.username?.toLowerCase() === superUsername ||
+      currentUser.username?.toLowerCase() === 'sudo'
+    );
 
-    if (!isAdmin) {
+    if (!isSuperAdmin) {
       return NextResponse.json(
-        { error: 'Unauthorized. Only Administrators can scan duplicate leads.' },
+        { error: 'Unauthorized. Only Superadmin can scan duplicate leads in Danger Zone.' },
         { status: 403 }
       );
     }
@@ -35,11 +41,17 @@ export async function GET() {
 export async function POST() {
   try {
     const currentUser = await getCurrentUser();
-    const isAdmin = currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'SUPERADMIN' || currentUser.isSuperAdmin);
+    const superUsername = (process.env.SUPERADMIN_USERNAME || 'sudo').toLowerCase();
+    const isSuperAdmin = currentUser && (
+      currentUser.isSuperAdmin ||
+      currentUser.role === 'SUPERADMIN' ||
+      currentUser.username?.toLowerCase() === superUsername ||
+      currentUser.username?.toLowerCase() === 'sudo'
+    );
 
-    if (!isAdmin) {
+    if (!isSuperAdmin) {
       return NextResponse.json(
-        { error: 'Unauthorized. Only Administrators can delete duplicate leads.' },
+        { error: 'Unauthorized. Only Superadmin can delete duplicate leads in Danger Zone.' },
         { status: 403 }
       );
     }
@@ -59,3 +71,4 @@ export async function POST() {
     );
   }
 }
+

@@ -81,7 +81,7 @@ export async function GET() {
       }
 
       const td = group.testDrive;
-      if (td === 'Yes') {
+      if (td === 'Scheduled' || td === 'Completed' || td === 'Yes') {
         stats.testDriveYes += count;
       } else {
         stats.testDriveNo += count;

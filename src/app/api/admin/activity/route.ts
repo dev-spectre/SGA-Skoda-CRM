@@ -91,8 +91,8 @@ export async function GET() {
         else if (s === 'live' || s === 'closed_successful') live++;
         else if (s === 'lost' || s === 'closed_unsuccessful') lost++;
 
-        if (l.testDrive === 'Yes') testDriveYes++;
-        else if (l.testDrive === 'No' || !l.testDrive) testDriveNo++;
+        if (l.testDrive === 'Scheduled' || l.testDrive === 'Completed' || l.testDrive === 'Yes') testDriveYes++;
+        else testDriveNo++;
       });
 
       const userUploadedLeads = leads.filter((l) => l.uploadedById === u.id);

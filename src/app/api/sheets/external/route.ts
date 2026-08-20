@@ -157,8 +157,12 @@ export async function POST(request: NextRequest) {
       // Test drive mapping
       const rawTd = getVal(row, mapping.testDrive).toLowerCase();
       let testDrive: string | null = null;
-      if (rawTd === 'yes' || rawTd === 'y' || rawTd === 'true' || rawTd === 'taken') testDrive = 'Yes';
-      else if (rawTd === 'no' || rawTd === 'n' || rawTd === 'false') testDrive = 'No';
+      if (rawTd === 'scheduled') testDrive = 'Scheduled';
+      else if (rawTd === 'completed' || rawTd === 'taken' || rawTd === 'done') testDrive = 'Completed';
+      else if (rawTd === 'cancelled' || rawTd === 'canceled') testDrive = 'Cancelled';
+      else if (rawTd === 'yes' || rawTd === 'y' || rawTd === 'true') testDrive = 'Scheduled';
+      else if (rawTd === 'no' || rawTd === 'n' || rawTd === 'false' || rawTd === 'not scheduled') testDrive = 'Not Scheduled';
+      else if (rawTd) testDrive = getVal(row, mapping.testDrive);
 
       // Created At parsing
       const createdAtRaw = getVal(row, mapping.createdAt);

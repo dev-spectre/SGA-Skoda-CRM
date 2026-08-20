@@ -349,6 +349,73 @@ export function ExternalUploadModal({ isOpen, onClose, onSuccess }: ExternalUplo
     }
   };
 
+  const handleDownloadSampleTemplate = () => {
+    try {
+      const sampleData = [
+        {
+          "Customer Name": "Rahul Sharma",
+          "Phone Number": "9876543210",
+          "Branch": "Coimbatore",
+          "City": "Coimbatore",
+          "Assigned Consultant": "Rajesh",
+          "Lead Status": "Not Contacted",
+          "Campaign / Ad Name": "Skoda Slavia Offer",
+          "Platform / Source": "Instagram",
+          "Test Drive": "Scheduled",
+          "Remark / Notes": "Interested in Slavia 1.5 TSI",
+          "Created Date": "2026-08-20",
+        },
+        {
+          "Customer Name": "Priya Sundaram",
+          "Phone Number": "9123456789",
+          "Branch": "Chennai",
+          "City": "Chennai",
+          "Assigned Consultant": "Karthik",
+          "Lead Status": "Contacted",
+          "Campaign / Ad Name": "Skoda Kushaq Campaign",
+          "Platform / Source": "Facebook",
+          "Test Drive": "Completed",
+          "Remark / Notes": "Completed test drive on Sunday",
+          "Created Date": "2026-08-19",
+        },
+        {
+          "Customer Name": "Arun Kumar",
+          "Phone Number": "9988776655",
+          "Branch": "MTP",
+          "City": "Mettupalayam",
+          "Assigned Consultant": "Unassigned",
+          "Lead Status": "Completed",
+          "Campaign / Ad Name": "Kodiaq Exclusive Booking",
+          "Platform / Source": "Google Ads",
+          "Test Drive": "Not Scheduled",
+          "Remark / Notes": "Booking confirmed",
+          "Created Date": "2026-08-18",
+        },
+      ];
+
+      const worksheet = XLSX.utils.json_to_sheet(sampleData);
+      worksheet["!cols"] = [
+        { wch: 18 },
+        { wch: 15 },
+        { wch: 14 },
+        { wch: 14 },
+        { wch: 20 },
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 18 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 14 },
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Leads Template");
+      XLSX.writeFile(workbook, "SGA_Skoda_CRM_Sample_Template.xlsx");
+    } catch (err: any) {
+      setErrorMsg(`Failed to generate sample template: ${err?.message || "Unknown error"}`);
+    }
+  };
+
   const handleClose = () => {
     setStep(1);
     setSelectedFile(null);
@@ -423,9 +490,46 @@ export function ExternalUploadModal({ isOpen, onClose, onSuccess }: ExternalUplo
               </div>
             </div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={handleClose} style={{ fontSize: "18px", padding: "4px 8px" }}>
-            ✕
-          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <button
+              type="button"
+              onClick={handleDownloadSampleTemplate}
+              title="Download sample .xlsx template with 100% pre-mapped CRM columns"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "7px",
+                border: "1px solid rgba(16, 185, 129, 0.4)",
+                background: "#ecfdf5",
+                color: "#047857",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#10b981";
+                e.currentTarget.style.color = "#ffffff";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "#ecfdf5";
+                e.currentTarget.style.color = "#047857";
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 13, height: 13 }}>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Download Template (.xlsx)</span>
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleClose} style={{ fontSize: "18px", padding: "4px 8px" }}>
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Error Notification */}
@@ -541,6 +645,52 @@ export function ExternalUploadModal({ isOpen, onClose, onSuccess }: ExternalUplo
               {/* Source Option 1: File Upload */}
               {sourceType === "file" && (
                 <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      background: "#ecfdf5",
+                      border: "1px solid rgba(16, 185, 129, 0.3)",
+                      borderRadius: "10px",
+                      padding: "10px 14px",
+                      marginBottom: "14px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "16px" }}>💡</span>
+                      <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#047857" }}>
+                        Need a pre-formatted Excel template with sample data?
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleTemplate}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "6px 12px",
+                        borderRadius: "7px",
+                        background: "#10b981",
+                        color: "#ffffff",
+                        border: "none",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        boxShadow: "0 2px 4px rgba(16, 185, 129, 0.2)",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 13, height: 13 }}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                      <span>Download Sample .xlsx</span>
+                    </button>
+                  </div>
+
                   <div
                     onClick={() => fileInputRef.current?.click()}
                     style={{

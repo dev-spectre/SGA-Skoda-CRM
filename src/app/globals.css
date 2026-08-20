@@ -405,6 +405,31 @@ select:focus, select:hover {
   border-color: #fecaca !important;
 }
 
+/* Test Drive Statuses */
+.status-select.td-not_scheduled {
+  background-color: #f8fafc !important;
+  color: #64748b !important;
+  border-color: #cbd5e1 !important;
+}
+
+.status-select.td-scheduled {
+  background-color: #eff6ff !important;
+  color: #0284c7 !important;
+  border-color: #bae6fd !important;
+}
+
+.status-select.td-completed {
+  background-color: #ecfdf5 !important;
+  color: #047857 !important;
+  border-color: #a7f3d0 !important;
+}
+
+.status-select.td-cancelled {
+  background-color: #fef2f2 !important;
+  color: #b91c1c !important;
+  border-color: #fecaca !important;
+}
+
 .status-select optgroup {
   font-weight: 700 !important;
   color: #475569 !important;

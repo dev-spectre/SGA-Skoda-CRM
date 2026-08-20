@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parsePhoneNumber, parseBranches } from "@/lib/utils";
 import BranchConsultantPicker from "@/components/BranchConsultantPicker";
+import MultiSelectDropdown from "@/components/MultiSelectDropdown";
 import { ExternalUploadModal } from "@/components/ExternalUploadModal";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -241,7 +242,12 @@ export default function DashboardPage() {
           const statusParam = urlParams.get("status");
           const uploaderParam = urlParams.get("uploader");
 
-          if (consultantParam !== null) setConsultantFilter(consultantParam);
+          if (consultantParam !== null) {
+            setConsultantFilter(consultantParam);
+            if (testDriveParam === null) {
+              setTestDriveFilter("");
+            }
+          }
           if (testDriveParam !== null) setTestDriveFilter(testDriveParam);
           if (branchParam !== null) setBranchFilter(branchParam);
           if (statusParam !== null) setStatusFilter(statusParam);
@@ -1484,16 +1490,23 @@ export default function DashboardPage() {
             setPagination(p => ({ ...p, page: 1 }));
           }}
         />
-        <select
+        {/* Status Multi-Select Filter */}
+        <MultiSelectDropdown
+          label="Status"
+          allLabel="All Statuses"
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-        >
-          <option value="">All Statuses</option>
-          <option value="not_contacted">Not Contacted</option>
-          <option value="pending">Contacted</option>
-          <option value="live">Completed</option>
-          <option value="lost">Lost</option>
-        </select>
+          options={[
+            { label: "Not Contacted", value: "not_contacted" },
+            { label: "Contacted", value: "pending" },
+            { label: "Completed", value: "live" },
+            { label: "Lost", value: "lost" },
+          ]}
+          onChange={(newVal) => {
+            setStatusFilter(newVal);
+            setPagination((p) => ({ ...p, page: 1 }));
+          }}
+        />
+
         {userRole === "ADMIN" || userRole === "SUPERADMIN" ? (
           <div>
             <BranchConsultantPicker
@@ -1528,47 +1541,60 @@ export default function DashboardPage() {
             <span>Branch: <strong style={{ textTransform: "capitalize", color: "var(--text-primary)" }}>{(userAssignedBranch || "").replace(/_/g, " ")}</strong></span>
           </div>
         ) : (
-          <select
+          <MultiSelectDropdown
+            label="Branch"
+            allLabel="All Branches"
             value={branchFilter}
-            onChange={(e) => { setBranchFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-          >
-            <option value="">All Branches</option>
-            {branches.map((b: string) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
+            options={branches.map((b: string) => ({ label: b, value: b }))}
+            onChange={(newVal) => {
+              setBranchFilter(newVal);
+              setPagination((p) => ({ ...p, page: 1 }));
+            }}
+          />
         )}
 
-        {/* Test Drive Filter */}
-        <select
+        {/* Test Drive Multi-Select Filter */}
+        <MultiSelectDropdown
+          label="Test Drive"
+          allLabel="All Test Drives"
           value={testDriveFilter}
-          onChange={(e) => { setTestDriveFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-        >
-          <option value="">All Test Drives</option>
-          <option value="Scheduled">Scheduled</option>
-          <option value="Completed">Completed</option>
-          <option value="Cancelled">Cancelled</option>
-          <option value="Not Scheduled">Not Scheduled</option>
-        </select>
+          options={[
+            { label: "Scheduled", value: "Scheduled" },
+            { label: "Completed", value: "Completed" },
+            { label: "Cancelled", value: "Cancelled" },
+            { label: "Not Scheduled", value: "Not Scheduled" },
+          ]}
+          onChange={(newVal) => {
+            setTestDriveFilter(newVal);
+            setPagination((p) => ({ ...p, page: 1 }));
+          }}
+        />
 
-        {/* Lead Source / Uploader Filter */}
-        <select
+        {/* Lead Source / Uploader Multi-Select Filter */}
+        <MultiSelectDropdown
+          label="Lead Source"
+          allLabel="All Lead Sources"
           value={uploaderFilter}
-          onChange={(e) => { setUploaderFilter(e.target.value); setPagination(p => ({ ...p, page: 1 })); }}
-        >
-          <option value="">All Lead Sources</option>
-          <option value="system">Google Sheet (Auto-Sync)</option>
-          <option value="external">All External Uploads</option>
-          {usersList && usersList.length > 0 && (
-            <optgroup label="Uploaded by User">
-              {usersList.map((u) => (
-                <option key={u.id} value={`user:${u.username}`}>
-                  Uploaded by {u.username} ({u.role})
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          options={[
+            { label: "Meta Ads", value: "system" },
+            { label: "All External Uploads", value: "external" },
+            ...(usersList && usersList.length > 0
+              ? [
+                  {
+                    group: "Uploaded by User",
+                    options: usersList.map((u) => ({
+                      label: `${u.username} (${u.role})`,
+                      value: `user:${u.username}`,
+                    })),
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(newVal) => {
+            setUploaderFilter(newVal);
+            setPagination((p) => ({ ...p, page: 1 }));
+          }}
+        />
 
         {/* Date Filter Quick Pills / Custom Modal Trigger */}
         <button
@@ -1739,14 +1765,29 @@ export default function DashboardPage() {
                       </td>
                       <td>
                         <select
-                          className="status-select"
+                          className={`status-select ${
+                            (lead.testDrive === "Scheduled" || lead.testDrive === "Yes")
+                              ? "td-scheduled"
+                              : lead.testDrive === "Completed"
+                              ? "td-completed"
+                              : lead.testDrive === "Cancelled"
+                              ? "td-cancelled"
+                              : "td-not_scheduled"
+                          }`}
                           style={{ padding: "4px" }}
-                          value={lead.testDrive || "Not Scheduled"}
+                          value={
+                            lead.testDrive === "Yes"
+                              ? "Scheduled"
+                              : lead.testDrive === "No"
+                              ? "Not Scheduled"
+                              : lead.testDrive || "Not Scheduled"
+                          }
                           onChange={(e) => handleTestDriveUpdate(lead, e.target.value)}
                         >
                           <option value="Not Scheduled">Not Scheduled</option>
-                          <option value="Yes">Yes</option>
-                          <option value="No">No</option>
+                          <option value="Scheduled">Scheduled</option>
+                          <option value="Completed">Completed</option>
+                          <option value="Cancelled">Cancelled</option>
                         </select>
                       </td>
                       <td>

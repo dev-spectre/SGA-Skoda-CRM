@@ -1208,8 +1208,8 @@ function onFormSubmit(e) {
         </div>
       </div>
 
-      {/* Danger Zone - Admin Only */}
-      {isAdmin && (
+      {/* Danger Zone - Superadmin Only */}
+      {isSuperAdmin && (
         <div
           className="settings-section"
           style={{
@@ -1222,9 +1222,24 @@ function onFormSubmit(e) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <span style={{ fontSize: 20 }}>⚠️</span>
             <h2 style={{ color: "var(--danger)", margin: 0 }}>Danger Zone</h2>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                background: "rgba(168, 85, 247, 0.12)",
+                color: "#a855f7",
+                border: "1px solid rgba(168, 85, 247, 0.25)",
+                padding: "2px 8px",
+                borderRadius: 999,
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+              }}
+            >
+              Superadmin Only
+            </span>
           </div>
           <p className="section-desc" style={{ marginBottom: 20 }}>
-            Destructive and irreversible database operations. Accessible only to administrators.
+            Destructive and irreversible database operations. Accessible only to Superadmin.
           </p>
 
           <div
@@ -1306,7 +1321,7 @@ function onFormSubmit(e) {
       )}
 
       {/* Delete Duplicates Confirmation Modal */}
-      {deduplicateModalOpen && (
+      {isSuperAdmin && deduplicateModalOpen && (
         <div className="modal-overlay" onClick={() => !deletingDuplicates && setDeduplicateModalOpen(false)}>
           <div
             className="modal"

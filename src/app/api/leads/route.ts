@@ -106,11 +106,19 @@ export async function GET(request: NextRequest) {
     }
     
     if (branch) {
-      const words = branch.split(' ').filter(Boolean);
-      if (words.length > 0) {
+      const branchTokens = branch.split(',').map(b => b.trim()).filter(Boolean);
+      if (branchTokens.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const branchConditions: any[] = branchTokens.map(b => {
+          const words = b.split(/\s+/).filter(Boolean);
+          if (words.length > 1) {
+            return { AND: words.map(w => ({ branch: { contains: w, mode: 'insensitive' } })) };
+          }
+          return { branch: { contains: b, mode: 'insensitive' } };
+        });
         statsWhere.AND = [
           ...(statsWhere.AND || []),
-          ...words.map(w => ({ branch: { contains: w, mode: 'insensitive' } }))
+          { OR: branchConditions }
         ];
       }
     }
@@ -121,31 +129,49 @@ export async function GET(request: NextRequest) {
     }
 
     if (consultant) {
-      if (consultant === 'Unassigned') {
-        statsWhere.OR = [
-          { assignedConsultant: null },
-          { assignedConsultant: '' }
+      const consultantTokens = consultant.split(',').map(c => c.trim()).filter(Boolean);
+      if (consultantTokens.length > 0) {
+        const consultantConditions: any[] = [];
+        consultantTokens.forEach(c => {
+          if (c === 'Unassigned') {
+            consultantConditions.push({ assignedConsultant: null }, { assignedConsultant: '' });
+          } else {
+            consultantConditions.push({ assignedConsultant: c });
+          }
+        });
+        statsWhere.AND = [
+          ...(statsWhere.AND || []),
+          { OR: consultantConditions }
         ];
-      } else {
-        statsWhere.assignedConsultant = consultant;
       }
     }
 
     const testDrive = searchParams.get('testDrive') || '';
     if (testDrive) {
-      if (testDrive === 'Not Scheduled') {
-        statsWhere.AND = [
-          ...(statsWhere.AND || []),
-          {
-            OR: [
+      const tdTokens = testDrive.split(',').map(s => s.trim()).filter(Boolean);
+      if (tdTokens.length > 0) {
+        const testDriveConditions: any[] = [];
+        tdTokens.forEach(td => {
+          if (td === 'Not Scheduled') {
+            testDriveConditions.push(
               { testDrive: null },
               { testDrive: '' },
-              { testDrive: 'Not Scheduled' }
-            ]
+              { testDrive: 'Not Scheduled' },
+              { testDrive: 'No' }
+            );
+          } else if (td === 'Scheduled') {
+            testDriveConditions.push(
+              { testDrive: 'Scheduled' },
+              { testDrive: 'Yes' }
+            );
+          } else {
+            testDriveConditions.push({ testDrive: td });
           }
+        });
+        statsWhere.AND = [
+          ...(statsWhere.AND || []),
+          { OR: testDriveConditions }
         ];
-      } else {
-        statsWhere.testDrive = testDrive;
       }
     }
 
@@ -159,7 +185,26 @@ export async function GET(request: NextRequest) {
 
     const uploader = searchParams.get('uploader');
     if (uploader) {
-      statsWhere.uploadedBy = { username: { equals: uploader.trim(), mode: 'insensitive' } };
+      const uploaderTokens = uploader.split(',').map(u => u.trim()).filter(Boolean);
+      if (uploaderTokens.length > 0) {
+        const uploaderConditions: any[] = [];
+        uploaderTokens.forEach(u => {
+          if (u === 'system' || u === 'sheet') {
+            uploaderConditions.push({ source: { not: 'External Upload' } });
+          } else if (u === 'external') {
+            uploaderConditions.push({ source: 'External Upload' });
+          } else if (u.startsWith('user:')) {
+            const username = u.replace('user:', '').trim();
+            uploaderConditions.push({ uploadedBy: { username: { equals: username, mode: 'insensitive' } } });
+          } else {
+            uploaderConditions.push({ uploadedBy: { username: { equals: u, mode: 'insensitive' } } });
+          }
+        });
+        statsWhere.AND = [
+          ...(statsWhere.AND || []),
+          { OR: uploaderConditions }
+        ];
+      }
     }
 
     const source = searchParams.get('source');
@@ -174,16 +219,26 @@ export async function GET(request: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { ...statsWhere };
     if (status) {
-      if (status === 'not_contacted' || status === 'created') {
-        where.status = { in: ['not_contacted', 'created'] };
-      } else if (status === 'pending') {
-        where.status = 'pending';
-      } else if (status === 'live' || status === 'closed_successful') {
-        where.status = { in: ['live', 'closed_successful'] };
-      } else if (status === 'lost' || status === 'closed_unsuccessful') {
-        where.status = { in: ['lost', 'closed_unsuccessful'] };
-      } else {
-        where.status = status;
+      const statusTokens = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statusTokens.length > 0) {
+        const dbStatuses = new Set<string>();
+        statusTokens.forEach(st => {
+          if (st === 'not_contacted' || st === 'created') {
+            dbStatuses.add('not_contacted');
+            dbStatuses.add('created');
+          } else if (st === 'pending') {
+            dbStatuses.add('pending');
+          } else if (st === 'live' || st === 'closed_successful') {
+            dbStatuses.add('live');
+            dbStatuses.add('closed_successful');
+          } else if (st === 'lost' || st === 'closed_unsuccessful') {
+            dbStatuses.add('lost');
+            dbStatuses.add('closed_unsuccessful');
+          } else {
+            dbStatuses.add(st);
+          }
+        });
+        where.status = { in: Array.from(dbStatuses) };
       }
     }
     
