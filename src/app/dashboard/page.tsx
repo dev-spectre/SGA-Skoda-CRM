@@ -1787,7 +1787,15 @@ export default function DashboardPage() {
                             </div>
                           )}
                         </td>
-                        <td style={{ fontFamily: "monospace" }}>{parsePhoneNumber(lead.phone)}</td>
+                        <td 
+                          style={{ 
+                            fontFamily: "monospace", 
+                            color: (lead.phone || "").replace(/\D/g, '').length > 10 ? "red" : "inherit" 
+                          }}
+                          title={(lead.phone || "").replace(/\D/g, '').length > 15 ? lead.phone : undefined}
+                        >
+                          {(lead.phone || "").replace(/\D/g, '').length > 15 ? (lead.phone || "").slice(0, 15) + "..." : (lead.phone || "")}
+                        </td>
                         <td>{lead.city || "—"}</td>
                         <td title={lead.adname || undefined} style={{ maxWidth: 200, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {lead.adname || "—"}

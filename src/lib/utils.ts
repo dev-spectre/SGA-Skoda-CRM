@@ -16,11 +16,12 @@ export function parsePhoneNumber(rawPhone: string | null | undefined): string {
   cleaned = cleaned.replace(/^p:\s*/i, '').trim();
   
   // Extract digits
+  const hasPlus = cleaned.startsWith('+');
   const digitsOnly = cleaned.replace(/\D/g, '');
   
-  // 12 digits starting with 91 (e.g. 919876543210 -> 9876543210)
-  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
-    return digitsOnly.slice(2);
+  // Standard 10 digits
+  if (digitsOnly.length === 10) {
+    return digitsOnly;
   }
   
   // 11 digits starting with 0 (e.g. 09876543210 -> 9876543210)
@@ -28,20 +29,23 @@ export function parsePhoneNumber(rawPhone: string | null | undefined): string {
     return digitsOnly.slice(1);
   }
   
-  // Standard 10 digits
-  if (digitsOnly.length === 10) {
-    return digitsOnly;
-  }
-  
-  // 10+ digits starting with 91
-  if (digitsOnly.length > 10 && digitsOnly.startsWith('91')) {
-    const withoutCC = digitsOnly.slice(2);
-    if (withoutCC.length >= 10) {
-      return withoutCC.slice(-10);
-    }
+  // 12 digits starting with 91 (e.g. 919876543210 -> 9876543210)
+  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+    return digitsOnly.slice(2);
   }
 
-  return digitsOnly.length >= 10 ? digitsOnly.slice(-10) : (digitsOnly || cleaned);
+  // 13+ digits starting with 0091 (e.g. 00919876543210 -> 9876543210)
+  if (digitsOnly.length === 14 && digitsOnly.startsWith('0091')) {
+    return digitsOnly.slice(4);
+  }
+  
+  // For other lengths (like >15 digits or international numbers), return the full cleaned number
+  // If it originally had a '+', keep it to indicate it's an international number
+  if (digitsOnly.length > 10) {
+    return hasPlus ? '+' + digitsOnly : digitsOnly;
+  }
+
+  return digitsOnly || cleaned;
 }
 
 export function sanitizeField(rawVal: string | null | undefined): string {
