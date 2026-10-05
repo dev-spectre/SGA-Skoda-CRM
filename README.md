@@ -1,34 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SGA Skoda CRM
+
+A Customer Relationship Management system for Skoda automotive dealerships, built with Next.js and Prisma.
+
+## Overview
+
+A CRM platform designed for Skoda dealerships to manage customers, consultants, service appointments, and vehicle sales. Features impersonation for admin access and notification systems.
+
+## Features
+
+- **Customer management** — track leads and customers
+- **Consultant management** — assign and manage sales consultants
+- **Service appointments** — schedule and track services
+- **Impersonation** — admin can impersonate consultants
+- **Notifications** — toast notification system
+- **Proxy routing** — custom proxy for external services
+
+## Tech Stack
+
+- **Framework:** Next.js (App Router)
+- **Language:** TypeScript
+- **ORM:** Prisma
+- **Database:** PostgreSQL
+- **Styling:** TailwindCSS
+- **Dev environment:** Nix shell
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Project Structure
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+├── app/                     # Next.js App Router pages
+├── src/
+│   ├── components/          # React components
+│   │   ├── ImpersonationBanner.tsx
+│   │   └── NotificationInit.tsx
+│   ├── proxy.ts             # Proxy routing
+│   └── instrumentation.ts   # Monitoring
+├── prisma/
+│   └── schema.prisma        # Database schema
+├── public/                  # Static assets
+├── next.config.ts
+├── tailwind.config.ts
+├── tsconfig.json
+├── package.json
+└── shell.nix                # Nix development shell
+```
 
-## Learn More
+## License
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
