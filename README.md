@@ -8,43 +8,43 @@ A lead management CRM for a Skoda automotive dealership — built to replace spr
 
 ### Login
 
-![Login](screenshots/login.png)
+![Login](screenshots/login.jpg)
 
 ### Dashboard
 
 Lead KPIs, conversion rate, and the filterable lead table.
 
-![Dashboard](screenshots/dashboard.png)
+![Dashboard](screenshots/dashboard.jpg)
 
 ### Consultants
 
 Per-consultant performance and assignment.
 
-![Consultants](screenshots/consultants.png)
+![Consultants](screenshots/consultants.jpg)
 
 ### Activity Log
 
 Audit trail of every status change, remark, and assignment.
 
-![Activity](screenshots/activity.png)
+![Activity](screenshots/activity.jpg)
 
 ### Calendar
 
 Follow-up dates across the month.
 
-![Calendar](screenshots/calendar.png)
+![Calendar](screenshots/calendar.jpg)
 
 ### Settings
 
 Platforms, branches, and notification configuration.
 
-![Settings](screenshots/settings.png)
+![Settings](screenshots/settings.jpg)
 
 ### Accounts
 
 User management with branch- and platform-scoped access.
 
-![Accounts](screenshots/accounts.png)
+![Accounts](screenshots/accounts.jpg)
 
 ## Features
 
