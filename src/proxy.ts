@@ -8,9 +8,12 @@ const publicPaths = ['/login', '/terms', '/privacy', '/api/auth/login', '/api/we
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  
-  // Allow public paths
-  if (publicPaths.some((p: string) => pathname.startsWith(p))) {
+
+  // Allow public paths (exact match for root, prefix for others)
+  const isPublic =
+    pathname === '/' ||
+    publicPaths.some((p: string) => pathname.startsWith(p));
+  if (isPublic) {
     return NextResponse.next();
   }
   
