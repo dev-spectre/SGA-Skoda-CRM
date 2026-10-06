@@ -17,6 +17,11 @@ export default function LoginPage() {
           <p className="subtitle">Sign in to manage your leads</p>
         </div>
         <LoginForm />
+        <div className="login-legal-links">
+          <a href="/terms">Terms of Service</a>
+          <span aria-hidden="true">&middot;</span>
+          <a href="/privacy">Privacy Policy</a>
+        </div>
       </div>
     </div>
   );

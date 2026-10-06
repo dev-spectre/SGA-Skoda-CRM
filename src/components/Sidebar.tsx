@@ -17,7 +17,7 @@ export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    if (pathname === "/login") return;
+    if (pathname === "/login" || pathname === "/terms" || pathname === "/privacy") return;
     fetch("/api/auth/me")
       .then((res) => res.json())
       .then((data) => {
@@ -42,8 +42,8 @@ export function Sidebar() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Don't show sidebar on login page
-  if (pathname === "/login") return null;
+  // Don't show sidebar on login or legal pages
+  if (pathname === "/login" || pathname === "/terms" || pathname === "/privacy") return null;
 
   const handleLogout = async () => {
     setMobileOpen(false);
