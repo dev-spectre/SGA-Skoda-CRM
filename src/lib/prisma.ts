@@ -11,6 +11,8 @@ if (typeof dns.setDefaultResultOrder === 'function') {
 
 export type ExtendedPrismaClient = PrismaClient & {
   consultant: any;
+  branch: any;
+  locationCache: any;
 };
 
 const globalForPrisma = globalThis as unknown as {

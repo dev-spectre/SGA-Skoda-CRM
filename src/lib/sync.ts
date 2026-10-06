@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { getSheetData, batchUpdateSheetRows } from '@/lib/google';
-import { parsePhoneNumber, sanitizeField, parseSheetStatus } from '@/lib/utils';
+import { parsePhoneNumber, sanitizeField, parseSheetStatus, isInvalidPhoneNumber } from '@/lib/utils';
 import { getCachedSettings } from '@/lib/settings';
 
 interface ColumnMapping {
@@ -167,6 +167,8 @@ export async function performSheetSync() {
     source: true,
     uploadedById: true,
     sheetId: true,
+    isInvalidPhone: true,
+    isBranchManual: true,
   };
 
   const phonesArr = Array.from(candidatePhones);
@@ -413,6 +415,7 @@ export async function performSheetSync() {
             sheetRow: rowNumber,
             sheetId: settings.selectedSpreadsheetId,
             fingerprint,
+            isInvalidPhone: isInvalidPhoneNumber(phone),
           }
         });
       }
@@ -435,6 +438,8 @@ export async function performSheetSync() {
         source: 'System',
         uploadedById: null,
         fingerprint,
+        isInvalidPhone: isInvalidPhoneNumber(phone),
+        isBranchManual: false,
       });
       synced++;
     }

@@ -30,6 +30,8 @@ model Lead {
   notifiedAt         DateTime?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
+  isInvalidPhone     Boolean        @default(false)
+  isBranchManual     Boolean        @default(false)
   hiddenBy           HiddenLead[]
   uploadedBy         User?          @relation("UserUploadedLeads", fields: [uploadedById], references: [id])
   activities         LeadActivity[]
@@ -39,6 +41,8 @@ model Lead {
   @@index([status])
   @@index([branch])
   @@index([fingerprint])
+  @@index([isInvalidPhone])
+  @@index([isBranchManual])
 }
 
 model User {
@@ -123,4 +127,40 @@ model Consultant {
 
   @@unique([name, branch])
   @@index([branch])
+}
+
+model Branch {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  code      String   @unique
+  address   String   @default("")
+  city      String   @default("")
+  latitude  Float?
+  longitude Float?
+  radiusKm  Float    @default(50.0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+  @@index([code])
+  @@index([city])
+  @@index([isActive])
+}
+
+model LocationCache {
+  id            Int      @id @default(autoincrement())
+  searchTerm    String   @unique
+  canonicalName String
+  district      String   @default("")
+  state         String   @default("")
+  latitude      Float
+  longitude     Float
+  source        String   @default("geocoder")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([searchTerm])
+  @@index([canonicalName])
+  @@index([state])
 }

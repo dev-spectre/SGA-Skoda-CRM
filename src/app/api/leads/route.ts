@@ -279,6 +279,89 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Category filter handling (valid, invalid, outside, all, priority)
+    const category = (searchParams.get('category') || '').trim().toLowerCase();
+
+    // Fetch active branches for category classification
+    const [rawLeadBranches, rawConsultants, rawUsers] = await Promise.all([
+      prisma.lead.groupBy({
+        by: ['branch'],
+        where: { branch: { not: '' } },
+      }),
+      prisma.consultant.groupBy({
+        by: ['branch'],
+        where: { branch: { not: '' } },
+      }),
+      prisma.user.groupBy({
+        by: ['assignedBranch'],
+        where: { assignedBranch: { not: null } },
+      }),
+    ]);
+
+    const activeBranchNames: string[] = [];
+    const activeBranchSet = new Set<string>();
+
+    const addBranch = (raw: string | null | undefined) => {
+      if (!raw) return;
+      const cleaned = raw.trim().replace(/[_-]/g, ' ');
+      if (!cleaned) return;
+      const lower = cleaned.toLowerCase();
+      if (!activeBranchSet.has(lower)) {
+        activeBranchSet.add(lower);
+        activeBranchNames.push(cleaned);
+      }
+      // Also add SGA variants
+      if (!lower.startsWith('sga')) {
+        const sgaMotors = `SGA Motors ${cleaned}`;
+        const sga = `SGA ${cleaned}`;
+        if (!activeBranchSet.has(sgaMotors.toLowerCase())) {
+          activeBranchSet.add(sgaMotors.toLowerCase());
+          activeBranchNames.push(sgaMotors);
+        }
+        if (!activeBranchSet.has(sga.toLowerCase())) {
+          activeBranchSet.add(sga.toLowerCase());
+          activeBranchNames.push(sga);
+        }
+      }
+    };
+
+    (rawLeadBranches as { branch: string | null }[]).forEach((b) => addBranch(b.branch));
+    (rawConsultants as { branch: string | null }[]).forEach((c) => addBranch(c.branch));
+    (rawUsers as { assignedBranch: string | null }[]).forEach((u) => addBranch(u.assignedBranch));
+
+    const validBranchCondition: any = {
+      branch: { in: activeBranchNames },
+    };
+
+    const unassignedBranchCondition: any = {
+      branch: { notIn: activeBranchNames },
+    };
+
+    const validPhoneCondition: any = {
+      isInvalidPhone: false,
+    };
+
+    const invalidPhoneCondition: any = {
+      isInvalidPhone: true,
+    };
+
+    const now = new Date();
+    const kolkataFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const todayDateStr = kolkataFormatter.format(now);
+    const todayEndOfDay = new Date(`${todayDateStr}T23:59:59.999+05:30`);
+
+    const priorityFollowUpCondition: any = {
+      OR: [
+        { followUpDate1: { lte: todayEndOfDay, not: null } },
+        { followUpDate2: { lte: todayEndOfDay, not: null } },
+      ],
+    };
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { ...statsWhere };
     if (status) {
@@ -304,7 +387,34 @@ export async function GET(request: NextRequest) {
         where.status = { in: Array.from(dbStatuses) };
       }
     }
-    
+
+    // Apply category filter
+    if (category === 'valid') {
+      where.AND = [
+        ...(where.AND || []),
+        validPhoneCondition,
+        validBranchCondition,
+      ];
+    } else if (category === 'invalid') {
+      where.AND = [
+        ...(where.AND || []),
+        invalidPhoneCondition,
+      ];
+    } else if (category === 'outside' || category === 'unassigned') {
+      where.AND = [
+        ...(where.AND || []),
+        validPhoneCondition,
+        unassignedBranchCondition,
+      ];
+    } else if (category === 'priority') {
+      where.AND = [
+        ...(where.AND || []),
+        validPhoneCondition,
+        validBranchCondition,
+        priorityFollowUpCondition,
+      ];
+    }
+
     const skipStats = searchParams.get('skipStats') === 'true' || searchParams.get('skipStats') === '1';
     const skipActivities = searchParams.get('skipActivities') === 'true' || searchParams.get('skipActivities') === '1' || isCalendar;
 
@@ -341,6 +451,8 @@ export async function GET(request: NextRequest) {
         select: { id: true, username: true }
       },
       uploadedAt: true,
+      isInvalidPhone: true,
+      isBranchManual: true,
       createdAt: true,
       updatedAt: true,
     };
@@ -353,6 +465,13 @@ export async function GET(request: NextRequest) {
     let liveLeads = 0;
     let lostLeads = 0;
     let maxUpdatedAt: string | null = null;
+    let categoryStats = {
+      valid: 0,
+      invalid: 0,
+      outside: 0,
+      all: 0,
+      priority: 0,
+    };
 
     const includeTotal = searchParams.get('includeTotal') === 'true' || Boolean(followUpDate || followUpStartDate) || !skipStats;
 
@@ -380,7 +499,17 @@ export async function GET(request: NextRequest) {
         });
       }
     } else {
-      const [dbLeads, dbTotal, statusCounts, maxAggregate] = await Promise.all([
+      const [
+        dbLeads,
+        dbTotal,
+        statusCounts,
+        maxAggregate,
+        validCount,
+        invalidCount,
+        outsideCount,
+        allCount,
+        priorityCount,
+      ] = await Promise.all([
         prisma.lead.findMany({
           where,
           orderBy,
@@ -390,7 +519,7 @@ export async function GET(request: NextRequest) {
         }),
         prisma.lead.count({ where }),
         prisma.lead.groupBy({
-          where: status ? where : statsWhere,
+          where: status || category ? where : statsWhere,
           by: ['status'],
           _count: {
             status: true,
@@ -402,10 +531,65 @@ export async function GET(request: NextRequest) {
             updatedAt: true,
           },
         }),
+        // 1. Valid: leads with valid phone + active branch
+        prisma.lead.count({
+          where: {
+            ...statsWhere,
+            AND: [
+              ...(statsWhere.AND || []),
+              validPhoneCondition,
+              validBranchCondition,
+            ],
+          },
+        }),
+        // 2. Invalid: leads with invalid phone
+        prisma.lead.count({
+          where: {
+            ...statsWhere,
+            AND: [
+              ...(statsWhere.AND || []),
+              invalidPhoneCondition,
+            ],
+          },
+        }),
+        // 3. Outside: leads with valid phone + unassigned branch
+        prisma.lead.count({
+          where: {
+            ...statsWhere,
+            AND: [
+              ...(statsWhere.AND || []),
+              validPhoneCondition,
+              unassignedBranchCondition,
+            ],
+          },
+        }),
+        // 4. All leads matching active statsWhere filters
+        prisma.lead.count({
+          where: statsWhere,
+        }),
+        // 5. Priority follow-up leads
+        prisma.lead.count({
+          where: {
+            ...statsWhere,
+            AND: [
+              ...(statsWhere.AND || []),
+              validPhoneCondition,
+              validBranchCondition,
+              priorityFollowUpCondition,
+            ],
+          },
+        }),
       ]);
 
       leads = dbLeads;
       total = dbTotal;
+      categoryStats = {
+        valid: validCount,
+        invalid: invalidCount,
+        outside: outsideCount,
+        all: allCount,
+        priority: priorityCount,
+      };
       if (maxAggregate?._max?.updatedAt) {
         maxUpdatedAt = maxAggregate._max.updatedAt.toISOString();
       }
@@ -497,6 +681,7 @@ export async function GET(request: NextRequest) {
         open: pendingLeads,
         closedSuccessful: liveLeads,
         closedUnsuccessful: lostLeads,
+        categories: categoryStats,
       },
     });
   } catch (error) {

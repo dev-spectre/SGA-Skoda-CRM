@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parsePhoneNumber, parseBranches } from "@/lib/utils";
+import { classifyLead, type LeadCategory } from "@/lib/classification";
 import BranchConsultantPicker from "@/components/BranchConsultantPicker";
 import MultiSelectDropdown from "@/components/MultiSelectDropdown";
 import { ExternalUploadModal } from "@/components/ExternalUploadModal";
@@ -61,6 +62,13 @@ interface Stats {
   open?: number;
   closedSuccessful?: number;
   closedUnsuccessful?: number;
+  categories?: {
+    valid: number;
+    invalid: number;
+    outside: number;
+    all: number;
+    priority: number;
+  };
 }
 
 interface Pagination {
@@ -146,7 +154,8 @@ let meUserFetchedAt = 0;
 
 export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [stats, setStats] = useState<Stats>({ total: 0, pending: 0, live: 0, lost: 0 });
+  const [stats, setStats] = useState<Stats>({ total: 0, pending: 0, live: 0, lost: 0, categories: { valid: 0, invalid: 0, outside: 0, all: 0, priority: 0 } });
+  const [category, setCategory] = useState<LeadCategory>("valid");
   const [pagination, setPagination] = useState<Pagination>({ page: 1, limit: PAGE_SIZE, total: 0, totalPages: 0 });
   const [mounted, setMounted] = useState(false);
   const [searchInput, setSearchInput] = useState("");
@@ -193,6 +202,9 @@ export default function DashboardPage() {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
+        if (typeof parsed.category === "string" && ["valid", "invalid", "outside", "all", "priority"].includes(parsed.category)) {
+          setCategory(parsed.category as LeadCategory);
+        }
         if (typeof parsed.search === "string") {
           setSearchInput(parsed.search);
           setSearch(parsed.search);
@@ -370,6 +382,7 @@ export default function DashboardPage() {
     try {
       const storageKey = username ? `crm_dashboard_filters_${username}` : "crm_dashboard_filters";
       const filterData = {
+        category,
         search,
         statusFilter,
         branchFilter,
@@ -388,7 +401,7 @@ export default function DashboardPage() {
     } catch (e) {
       console.error("Failed to save dashboard filters to localStorage:", e);
     }
-  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
+  }, [category, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, mounted, username]);
 
   const [loading, setLoading] = useState(true);
   const [accessRestricted, setAccessRestricted] = useState(false);
@@ -523,6 +536,7 @@ export default function DashboardPage() {
     try {
       const params = new URLSearchParams();
       params.set("primaryOrder", primaryOrder);
+      if (category && category !== "all") params.set("category", category);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
       if (branchFilter) params.set("branch", branchFilter);
@@ -647,10 +661,11 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, updateBranchWindow]);
+  }, [pagination.page, category, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, updateBranchWindow]);
 
 
   const filterStateRef = useRef({
+    category,
     search,
     statusFilter,
     branchFilter,
@@ -667,6 +682,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     filterStateRef.current = {
+      category,
       search,
       statusFilter,
       branchFilter,
@@ -804,6 +820,7 @@ export default function DashboardPage() {
       params.set("primaryOrder", primaryOrder);
       params.set("secondaryField", secondaryField);
       params.set("secondaryOrder", secondaryOrder);
+      if (category && category !== "all") params.set("category", category);
       if (search) params.set("search", search);
       if (branchFilter) params.set("branch", branchFilter);
       if (consultantFilter) params.set("consultant", consultantFilter);
@@ -847,6 +864,56 @@ export default function DashboardPage() {
     return Array.from(branchMap.values()).sort((a, b) => a.localeCompare(b));
   }, [leads, apiBranches]);
 
+
+  const handleCategoryChange = useCallback((newCat: LeadCategory) => {
+    if (category === newCat) return;
+    setCategory(newCat);
+    setPagination(p => ({ ...p, page: 1 }));
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (newCat === "valid") {
+        url.searchParams.delete("category");
+      } else {
+        url.searchParams.set("category", newCat);
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [category]);
+
+  const categoryCounts = useMemo(() => {
+    if (stats?.categories && stats.categories.all > 0) {
+      return {
+        valid: stats.categories.valid ?? 0,
+        invalid: stats.categories.invalid ?? 0,
+        outside: stats.categories.outside ?? 0,
+        all: stats.categories.all ?? 0,
+      };
+    }
+
+    let vCount = 0;
+    let iCount = 0;
+    let oCount = 0;
+
+    const branchSet = new Set(branches.map(b => b.toLowerCase().trim()));
+
+    for (const l of leads) {
+      const cat = classifyLead(l, branchSet);
+      if (cat === "invalid") {
+        iCount++;
+      } else if (cat === "outside") {
+        oCount++;
+      } else {
+        vCount++;
+      }
+    }
+
+    return {
+      valid: vCount,
+      invalid: iCount,
+      outside: oCount,
+      all: leads.length,
+    };
+  }, [stats?.categories, leads, branches]);
 
   const getConsultantGroupsForLead = useCallback((lead: Lead) => {
     // 1. Parse lead branches
@@ -1641,6 +1708,95 @@ export default function DashboardPage() {
         );
       })()}
 
+
+      {/* Lead Category Switcher */}
+      <div className="lead-category-bar-wrapper">
+        <div className="lead-category-tabs" role="tablist" aria-label="Lead Categories">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={category === "valid"}
+            className={`lead-category-tab lead-category-tab--valid ${category === "valid" ? "active" : ""}`}
+            onClick={() => handleCategoryChange("valid")}
+            title="Tamil Nadu leads with valid phone numbers (Default)"
+          >
+            <span className="lead-category-tab-label">Valid (Tamil Nadu)</span>
+            <span className="lead-category-badge">
+              {categoryCounts.valid}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={category === "invalid"}
+            className={`lead-category-tab lead-category-tab--invalid ${category === "invalid" ? "active" : ""}`}
+            onClick={() => handleCategoryChange("invalid")}
+            title="Leads with invalid phone numbers"
+          >
+            <span className="lead-category-tab-label">Invalid</span>
+            <span className="lead-category-badge">
+              {categoryCounts.invalid}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={category === "outside"}
+            className={`lead-category-tab lead-category-tab--outside ${category === "outside" ? "active" : ""}`}
+            onClick={() => handleCategoryChange("outside")}
+            title="Leads located outside Tamil Nadu"
+          >
+            <span className="lead-category-tab-label">Outside</span>
+            <span className="lead-category-badge">
+              {categoryCounts.outside}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={category === "all"}
+            className={`lead-category-tab lead-category-tab--all ${category === "all" ? "active" : ""}`}
+            onClick={() => handleCategoryChange("all")}
+            title="All registered leads across all categories"
+          >
+            <span className="lead-category-tab-label">All Leads</span>
+            <span className="lead-category-badge">
+              {categoryCounts.all}
+            </span>
+          </button>
+        </div>
+
+        {/* Category Scope Helper Description */}
+        <div className="lead-category-indicator">
+          {category === "valid" && (
+            <span className="lead-category-hint valid">
+              <span className="lead-category-hint-dot" />
+              Showing <strong>Tamil Nadu</strong> leads with valid phone numbers (Default)
+            </span>
+          )}
+          {category === "invalid" && (
+            <span className="lead-category-hint invalid">
+              <span className="lead-category-hint-dot" />
+              Showing leads with <strong>invalid phone numbers</strong>
+            </span>
+          )}
+          {category === "outside" && (
+            <span className="lead-category-hint outside">
+              <span className="lead-category-hint-dot" />
+              Showing leads located <strong>outside Tamil Nadu</strong>
+            </span>
+          )}
+          {category === "all" && (
+            <span className="lead-category-hint all">
+              <span className="lead-category-hint-dot" />
+              Showing <strong>all</strong> registered leads across all categories
+            </span>
+          )}
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="filter-bar">
