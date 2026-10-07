@@ -126,27 +126,49 @@ interface ExternalGeocodeResponse {
  * and bounding box restricted strictly to Tamil Nadu.
  */
 export async function queryNominatim(query: string): Promise<ExternalGeocodeResponse | null> {
-  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
-    query
-  )}&format=json&addressdetails=1&countrycodes=in&limit=1`;
+  const fetchNominatim = async (q: string, withViewbox = true) => {
+    const viewboxParam = withViewbox
+      ? `&viewbox=${TAMIL_NADU_BOUNDS.minLon},${TAMIL_NADU_BOUNDS.maxLat},${TAMIL_NADU_BOUNDS.maxLon},${TAMIL_NADU_BOUNDS.minLat}`
+      : '';
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+      q
+    )}&format=json&addressdetails=1&countrycodes=in${viewboxParam}&limit=1`;
 
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'SGA-Tata-CRM/1.0 (dealership-lead-routing)',
-      Accept: 'application/json',
-    },
-  });
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'SGA-Skoda-CRM/1.0 (dealership-lead-routing)',
+        Accept: 'application/json',
+      },
+    });
 
-  if (!res.ok) {
-    throw new Error(`Nominatim error: HTTP ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`Nominatim error: HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      return null;
+    }
+    return data[0];
+  };
+
+  // 1. Try first with Tamil Nadu bounding box viewbox
+  let first = await fetchNominatim(query, true);
+
+  // 2. If not matched, try appending ', Tamil Nadu' with bounding box
+  if (!first && !query.toLowerCase().includes('tamil nadu')) {
+    first = await fetchNominatim(`${query}, Tamil Nadu`, true);
   }
 
-  const data = await res.json();
-  if (!Array.isArray(data) || data.length === 0) {
+  // 3. If still not matched, check general Indian query without bounding box to catch outside-state cities
+  if (!first) {
+    first = await fetchNominatim(query, false);
+  }
+
+  if (!first) {
     return null;
   }
 
-  const first = data[0];
   const address = first.address || {};
   const state = address.state || address.region || '';
   const district = address.state_district || address.county || address.city || '';

@@ -31,15 +31,27 @@ const DEFAULT_MAPPING: ColumnMapping = {
   followUpDate1: 8,
   followUpDate2: 9,
   platform: 10,
-  testDrive: 11,
-  assignedConsultant: 12,
+  // testDrive and assignedConsultant are optional CRM fields and must NEVER default to arbitrary column indices!
 };
+
+export const KNOWN_CONSULTANT_NAMES = new Set([
+  'kishor kumar', 'surya s', 'alfiya', 'ajithesh', 'rajkumar a',
+  'sivaprasanth v', 'santhosh', 'palaniyappan s', 'gunaseelan', 'sathish m',
+  'simon e', 'sridhaaran', 'suriya s', 'suriya', 'venkatesh', 'ebenezer',
+  'santhosh kumar s', 'venkateshwaran', 'rumash', 'arun albert', 'kannan d d',
+  'murali', 'janarthanan', 'nawin', 'renu kumar m', 'arun kumar p', 'kiran',
+  'rahul', 'satheeshkumar s', 'madhan kumar b', 'arun kumar d k', 'paramasivam',
+  'dhanaseelan', 'nithish', 'tarun (ic)'
+]);
 
 function isLowQualityLead(name: string, phone: string, city: string): boolean {
   if (!name && !phone) return true;
   if (!phone || phone.length < 5) return true;
-  const isJunkText = (val: string) => /^(n\/?a|null|nil|none|test|\.|\-)$/i.test(val.trim());
+  const isJunkText = (val: string) => /^(n\/?a|null|nil|none|test|\.|\-|undefined)$/i.test(val.trim());
   if ((!name || isJunkText(name)) && (!city || isJunkText(city))) return true;
+  // Guard against accidental duplicate header rows inside sheet data
+  if (/^(full_?name|name|first_?name|phone_?number|customer_?name)$/i.test(name.trim())) return true;
+  if (/^(phone_?number|phone|mobile|contact|contact_?no)$/i.test(phone.trim())) return true;
   return false;
 }
 
@@ -71,9 +83,36 @@ export async function performSheetSync() {
       return { synced: 0, duplicates: 0, skippedLowQuality: 0, skippedDuplicates: 0, total: 0, error: 'Settings not configured' };
     }
 
-  const mapping: ColumnMapping = settings.columnMapping
-    ? { ...DEFAULT_MAPPING, ...JSON.parse(settings.columnMapping) }
+  const parsedMapping: Partial<ColumnMapping> = settings.columnMapping
+    ? JSON.parse(settings.columnMapping)
+    : {};
+
+  // If custom columnMapping is configured in settings, use ONLY explicitly configured columns.
+  // Do NOT blindly spread DEFAULT_MAPPING which introduces phantom assignedConsultant/testDrive column indices!
+  const rawMapping: ColumnMapping = settings.columnMapping
+    ? (parsedMapping as ColumnMapping)
     : DEFAULT_MAPPING;
+
+  // Collision Guard: Ensure no writable CRM field collides with any source column
+  const sourceColIndices = new Map<number, string>();
+  if (rawMapping.branch !== undefined && rawMapping.branch >= 0) sourceColIndices.set(rawMapping.branch, 'branch');
+  if (rawMapping.name !== undefined && rawMapping.name >= 0) sourceColIndices.set(rawMapping.name, 'name');
+  if (rawMapping.phone !== undefined && rawMapping.phone >= 0) sourceColIndices.set(rawMapping.phone, 'phone');
+  if (rawMapping.city !== undefined && rawMapping.city >= 0) sourceColIndices.set(rawMapping.city, 'city');
+  if (rawMapping.adname !== undefined && rawMapping.adname >= 0) sourceColIndices.set(rawMapping.adname, 'adname');
+  if (rawMapping.platform !== undefined && rawMapping.platform >= 0) sourceColIndices.set(rawMapping.platform, 'platform');
+  if (rawMapping.createdAt !== undefined && rawMapping.createdAt >= 0) sourceColIndices.set(rawMapping.createdAt, 'createdAt');
+
+  const mapping: ColumnMapping = { ...rawMapping };
+
+  if (mapping.assignedConsultant !== undefined && sourceColIndices.has(mapping.assignedConsultant)) {
+    console.warn(`[Sync Guard] assignedConsultant mapped to column ${mapping.assignedConsultant} collides with source '${sourceColIndices.get(mapping.assignedConsultant)}'. Disabling assignedConsultant sheet sync.`);
+    delete mapping.assignedConsultant;
+  }
+  if (mapping.testDrive !== undefined && sourceColIndices.has(mapping.testDrive)) {
+    console.warn(`[Sync Guard] testDrive mapped to column ${mapping.testDrive} collides with source '${sourceColIndices.get(mapping.testDrive)}'. Disabling testDrive sheet sync.`);
+    delete mapping.testDrive;
+  }
 
   const rows = await getSheetData(settings.selectedSpreadsheetId, settings.selectedSheetName);
 
@@ -249,7 +288,15 @@ export async function performSheetSync() {
     const rawFollowUpDate1 = mapping.followUpDate1 !== undefined && mapping.followUpDate1 >= 0 ? (row[mapping.followUpDate1] || '').toString() : '';
     const rawFollowUpDate2 = mapping.followUpDate2 !== undefined && mapping.followUpDate2 >= 0 ? (row[mapping.followUpDate2] || '').toString() : '';
     const adname = sanitizeField(rawAdname);
-    const branch = sanitizeField(rawBranch);
+    let branch = sanitizeField(rawBranch);
+
+    // Safeguard: Check if sheet's branch column cell contains a consultant's name
+    const isBranchCellConsultantName = KNOWN_CONSULTANT_NAMES.has(branch.toLowerCase().trim());
+    let consultantFoundInBranchCol: string | null = null;
+    if (isBranchCellConsultantName) {
+      consultantFoundInBranchCol = branch;
+      branch = ''; // Do NOT save consultant name as branch!
+    }
 
     let followUpDate1: Date | null = null;
     if (rawFollowUpDate1) {
@@ -325,14 +372,16 @@ export async function performSheetSync() {
       // STRICT RULE: ONLY remark, followup, status, testdrive, assigned consultant are allowed to be written back to sheets
       const corrections: { col: number; value: string }[] = [];
 
-      // 1. Status Mismatch Correction
+      // 1. Status Synchronization
+      let shouldUpdateStatusFromSheet = false;
+      let newStatusFromSheet: string | null = null;
+
       if (mapping.status !== undefined && mapping.status >= 0) {
         const normExistingStatus = (existing.status === 'created' ? 'not_contacted' : existing.status === 'closed_successful' ? 'live' : existing.status === 'closed_unsuccessful' ? 'lost' : existing.status) || 'not_contacted';
         let formattedDbStatus = 'Not Contacted';
         if (normExistingStatus === 'pending') formattedDbStatus = 'Contacted';
         else if (normExistingStatus === 'live') formattedDbStatus = 'Completed';
         else if (normExistingStatus === 'lost') formattedDbStatus = 'Lost';
-        else if (normExistingStatus === 'callback') formattedDbStatus = 'Callback';
 
         const rawSheetStatusStr = (row[mapping.status] || '').toString().trim();
         const normSheetStatus = parseSheetStatus(rawSheetStatusStr.toLowerCase());
@@ -340,8 +389,15 @@ export async function performSheetSync() {
         // Prevent race-condition status reverts by checking if DB was recently updated
         const isRecentlyUpdated = existing.updatedAt && (Date.now() - new Date(existing.updatedAt).getTime() < 60000);
 
-        if (rawSheetStatusStr && (normSheetStatus !== normExistingStatus || isRecentlyUpdated)) {
-          corrections.push({ col: mapping.status, value: formattedDbStatus });
+        if (rawSheetStatusStr && normSheetStatus !== normExistingStatus) {
+          if (isRecentlyUpdated) {
+            // CRM user just modified the lead status recently: push authoritative CRM status to Google Sheet
+            corrections.push({ col: mapping.status, value: formattedDbStatus });
+          } else {
+            // Lead has not been modified in CRM recently: update DB lead status from Google Sheet
+            shouldUpdateStatusFromSheet = true;
+            newStatusFromSheet = normSheetStatus;
+          }
         }
       }
 
@@ -373,8 +429,8 @@ export async function performSheetSync() {
         }
       }
 
-      // 5. Test Drive Mismatch Correction
-      if (mapping.testDrive !== undefined && mapping.testDrive >= 0) {
+      // 5. Test Drive Mismatch Correction (NEVER write to a source column like branch/platform)
+      if (mapping.testDrive !== undefined && mapping.testDrive >= 0 && !sourceColIndices.has(mapping.testDrive)) {
         const rawSheetTd = (row[mapping.testDrive] || '').toString().trim();
         const dbTd = (existing.testDrive || '').trim();
         if (existing.testDrive !== null && existing.testDrive !== undefined && rawSheetTd !== dbTd) {
@@ -382,8 +438,8 @@ export async function performSheetSync() {
         }
       }
 
-      // 6. Assigned Consultant Mismatch Correction
-      if (mapping.assignedConsultant !== undefined && mapping.assignedConsultant >= 0) {
+      // 6. Assigned Consultant Mismatch Correction (NEVER write to a source column like branch!)
+      if (mapping.assignedConsultant !== undefined && mapping.assignedConsultant >= 0 && !sourceColIndices.has(mapping.assignedConsultant)) {
         const rawSheetCons = (row[mapping.assignedConsultant] || '').toString().trim();
         const dbCons = (existing.assignedConsultant || '').trim();
         if (existing.assignedConsultant !== null && existing.assignedConsultant !== undefined && rawSheetCons !== dbCons) {
@@ -395,33 +451,49 @@ export async function performSheetSync() {
         sheetUpdatesToCorrect.push({ rowNumber, updates: corrections });
       }
 
-      // Only queue DB update if metadata changed from sheet, preserving DB CRM fields
+      // Only queue DB update if metadata or status changed from sheet, preserving DB CRM fields
       const hasMetadataChanged = (
+        shouldUpdateStatusFromSheet ||
         existing.name !== name ||
         existing.phone !== phone ||
         existing.city !== city ||
         existing.adname !== adname ||
-        existing.branch !== branch ||
+        (!isBranchCellConsultantName && branch && existing.branch !== branch) ||
+        (isBranchCellConsultantName && consultantFoundInBranchCol && !existing.assignedConsultant) ||
         existing.platform !== platform ||
         existing.sheetRow !== rowNumber ||
         existing.sheetId !== settings.selectedSpreadsheetId
       );
 
       if (hasMetadataChanged) {
+        const updatePayload: any = {
+          name,
+          phone,
+          city,
+          adname,
+          platform,
+          sheetRow: rowNumber,
+          sheetId: settings.selectedSpreadsheetId,
+          fingerprint,
+          isInvalidPhone: isInvalidPhoneNumber(phone),
+        };
+
+        if (shouldUpdateStatusFromSheet && newStatusFromSheet) {
+          updatePayload.status = newStatusFromSheet;
+        }
+
+        // If sheet's branch cell contained a consultant name, safely attribute it to assignedConsultant
+        if (isBranchCellConsultantName && consultantFoundInBranchCol) {
+          if (!existing.assignedConsultant) {
+            updatePayload.assignedConsultant = consultantFoundInBranchCol;
+          }
+        } else if (!isBranchCellConsultantName && branch) {
+          updatePayload.branch = branch;
+        }
+
         toUpdate.push({
           id: existing.id,
-          data: {
-            name,
-            phone,
-            city,
-            adname,
-            branch,
-            platform,
-            sheetRow: rowNumber,
-            sheetId: settings.selectedSpreadsheetId,
-            fingerprint,
-            isInvalidPhone: isInvalidPhoneNumber(phone),
-          }
+          data: updatePayload,
         });
       }
       duplicates++;
@@ -431,7 +503,8 @@ export async function performSheetSync() {
         phone,
         city,
         adname,
-        branch,
+        branch: isBranchCellConsultantName ? '' : branch,
+        assignedConsultant: isBranchCellConsultantName ? consultantFoundInBranchCol : null,
         followUpDate1,
         followUpDate2,
         createdAt,

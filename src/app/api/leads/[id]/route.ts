@@ -302,10 +302,17 @@ export async function PATCH(
               value: followUpDate2 ? new Date(followUpDate2).toISOString().split('T')[0] : ''
             });
           }
-          if (assignedConsultant !== undefined && mapping.assignedConsultant !== undefined) {
+          // Build set of source columns that must NEVER be written to
+          const sourceColSet = new Set<number>();
+          const sourceKeys = ['branch', 'name', 'phone', 'city', 'adname', 'platform', 'createdAt'] as const;
+          for (const k of sourceKeys) {
+            if (mapping[k] !== undefined && mapping[k] >= 0) sourceColSet.add(mapping[k]);
+          }
+
+          if (assignedConsultant !== undefined && mapping.assignedConsultant !== undefined && !sourceColSet.has(mapping.assignedConsultant)) {
             updates.push({ col: mapping.assignedConsultant, value: assignedConsultant || '' });
           }
-          if (testDrive !== undefined && mapping.testDrive !== undefined) {
+          if (testDrive !== undefined && mapping.testDrive !== undefined && !sourceColSet.has(mapping.testDrive)) {
             updates.push({ col: mapping.testDrive, value: testDrive || '' });
           }
 

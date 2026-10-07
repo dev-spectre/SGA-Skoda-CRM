@@ -556,6 +556,10 @@ export default function DashboardPage() {
     try {
       const params = new URLSearchParams();
       params.set("primaryOrder", primaryOrder);
+      if (secondaryField && secondaryField !== "createdAt") {
+        params.set("secondaryField", secondaryField);
+        params.set("secondaryOrder", secondaryOrder);
+      }
       if (category && category !== "all") params.set("category", category);
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
@@ -690,7 +694,7 @@ export default function DashboardPage() {
         isFetchingRef.current = false;
       }
     }
-  }, [pagination.page, category, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, updateBranchWindow]);
+  }, [pagination.page, category, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, primaryOrder, secondaryField, secondaryOrder, updateBranchWindow]);
 
 
   const filterStateRef = useRef({
@@ -725,7 +729,7 @@ export default function DashboardPage() {
       limit: pagination.limit,
       total: pagination.total,
     };
-  }, [search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, pagination.page, pagination.limit, pagination.total]);
+  }, [category, search, statusFilter, branchFilter, consultantFilter, testDriveFilter, uploaderFilter, platformFilter, startDate, endDate, pagination.page, pagination.limit, pagination.total]);
 
   useEffect(() => {
     fetchLeads();
@@ -741,6 +745,7 @@ export default function DashboardPage() {
         if (lastSyncTimestampRef.current) {
           checkParams.set("since", lastSyncTimestampRef.current);
         }
+        if (f.category && f.category !== "all") checkParams.set("category", f.category);
         if (f.search) checkParams.set("search", f.search);
         if (f.statusFilter) checkParams.set("status", f.statusFilter);
         if (f.branchFilter) checkParams.set("branch", f.branchFilter);
@@ -779,7 +784,7 @@ export default function DashboardPage() {
           setStats(prev => ({
             ...prev,
             ...data.stats,
-            categories: prev?.categories || data.stats.categories,
+            categories: data.stats.categories || prev?.categories,
           }));
         }
 
@@ -799,10 +804,12 @@ export default function DashboardPage() {
               if (existingIds.has(l.id)) return false;
               if (!l.createdAt) return false;
               const createdTime = new Date(l.createdAt).getTime();
-              return prevSyncTime > 0 && createdTime >= prevSyncTime;
+              const updatedTime = l.updatedAt ? new Date(l.updatedAt).getTime() : createdTime;
+              const isNewlyCreated = Math.abs(updatedTime - createdTime) < 15000;
+              return prevSyncTime > 0 && createdTime >= prevSyncTime && isNewlyCreated;
             });
 
-            if (newlyCreatedLeads.length > 0 && filterStateRef.current.page === 1 && primaryOrder === 'desc') {
+            if (newlyCreatedLeads.length > 0 && filterStateRef.current.page === 1 && primaryOrder === 'desc' && !secondaryField) {
               newlyCreatedLeads.sort((a: Lead, b: Lead) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
               return [...newlyCreatedLeads, ...prevLeads].slice(0, filterStateRef.current.limit || PAGE_SIZE);
             }
@@ -948,30 +955,13 @@ export default function DashboardPage() {
       }
     }
 
-    let vCount = 0;
-    let iCount = 0;
-    let oCount = 0;
-
-    const branchSet = new Set(branches.map(b => b.toLowerCase().trim()));
-
-    for (const l of leads) {
-      const cat = classifyLead(l, branchSet);
-      if (cat === "invalid") {
-        iCount++;
-      } else if (cat === "outside") {
-        oCount++;
-      } else {
-        vCount++;
-      }
-    }
-
     return {
-      valid: vCount,
-      invalid: iCount,
-      outside: oCount,
-      all: pagination.total || leads.length,
+      valid: stats?.categories?.valid ?? 0,
+      invalid: stats?.categories?.invalid ?? 0,
+      outside: stats?.categories?.outside ?? 0,
+      all: stats?.categories?.all ?? pagination.total ?? 0,
     };
-  }, [stats?.categories, leads, branches, pagination.total]);
+  }, [stats?.categories, pagination.total]);
 
   const getConsultantGroupsForLead = useCallback((lead: Lead) => {
     // 1. Parse lead branches
@@ -1102,51 +1092,9 @@ export default function DashboardPage() {
   }, [consultantsList, branchFilter, userRole, userAssignedBranch]);
 
   const displayedLeads = useMemo(() => {
-    let result = leads;
-    if (branchFilter) {
-      result = result.filter(l => matchBranchFilter(l.branch, branchFilter));
-    }
-    if (!result || result.length === 0) return result;
-
-    const list = [...result];
-
-    list.sort((a, b) => {
-      const dayA = toISTDateString(a.createdAt);
-      const dayB = toISTDateString(b.createdAt);
-
-      // Primary order: Created At date
-      if (dayA !== dayB) {
-        return primaryOrder === "desc" ? dayB.localeCompare(dayA) : dayA.localeCompare(dayB);
-      }
-
-      // Secondary order: sort same day data by secondaryField category
-      if (secondaryField) {
-        const rawValA: any = a[secondaryField as keyof Lead];
-        const rawValB: any = b[secondaryField as keyof Lead];
-
-        if (secondaryField === "followUpDate1" || secondaryField === "followUpDate2" || secondaryField === "createdAt") {
-          const tA = rawValA ? new Date(rawValA).getTime() : 0;
-          const tB = rawValB ? new Date(rawValB).getTime() : 0;
-          if (tA !== tB) {
-            return secondaryOrder === "asc" ? tA - tB : tB - tA;
-          }
-        } else {
-          const strA = (rawValA ?? "").toString().toLowerCase().trim();
-          const strB = (rawValB ?? "").toString().toLowerCase().trim();
-          if (strA !== strB) {
-            return secondaryOrder === "asc" ? strA.localeCompare(strB) : strB.localeCompare(strA);
-          }
-        }
-      }
-
-      // Tie-breaker for same day: exact createdAt timestamp
-      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return primaryOrder === "desc" ? timeB - timeA : timeA - timeB;
-    });
-
-    return list;
-  }, [leads, branchFilter, secondaryField, secondaryOrder, primaryOrder]);
+    if (!branchFilter) return leads;
+    return leads.filter(l => matchBranchFilter(l.branch, branchFilter));
+  }, [leads, branchFilter]);
 
   const handleExportExcel = async () => {
     setExportLoading(true);
@@ -1198,7 +1146,10 @@ export default function DashboardPage() {
 
       const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return primaryOrder === "desc" ? timeB - timeA : timeA - timeB;
+      if (timeA !== timeB) {
+        return primaryOrder === "desc" ? timeB - timeA : timeA - timeB;
+      }
+      return (b.id ?? 0) - (a.id ?? 0);
     });
 
     const exportData = exportLeads.map((l: Lead) => ({
@@ -1388,9 +1339,6 @@ export default function DashboardPage() {
         if (data.lead) {
           patchLeadInCache(data.lead);
         }
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("crm-leads-updated"));
-        }
       } else {
         showToast(data.error || data.details || "Failed to update date", "error");
         setLeads(prevLeads);
@@ -1439,9 +1387,6 @@ export default function DashboardPage() {
         if (data.lead) {
           patchLeadInCache(data.lead);
         }
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("crm-leads-updated"));
-        }
       } else {
         showToast(data.error || data.details || "Failed to add follow-up", "error");
         setLeads(prevLeads);
@@ -1488,9 +1433,6 @@ export default function DashboardPage() {
         if (data.lead) {
           patchLeadInCache(data.lead);
         }
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("crm-leads-updated"));
-        }
       } else {
         showToast(data.error || data.details || "Failed to clear follow-up", "error");
         setLeads(prevLeads);
@@ -1521,9 +1463,6 @@ export default function DashboardPage() {
         showToast("Follow-up date updated");
         if (data.lead) {
           patchLeadInCache(data.lead);
-        }
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("crm-leads-updated"));
         }
       } else {
         showToast(data.error || data.details || "Failed to update date", "error");
@@ -2158,7 +2097,6 @@ export default function DashboardPage() {
             options={[
               { label: "Not Contacted", value: "not_contacted" },
               { label: "Contacted", value: "pending" },
-              { label: "Callback", value: "callback" },
               { label: "Completed", value: "live" },
               { label: "Lost", value: "lost" },
             ]}
@@ -2533,7 +2471,6 @@ export default function DashboardPage() {
                             >
                               <option value="not_contacted">Not Contacted</option>
                               <option value="pending">Contacted</option>
-                              <option value="callback">Callback</option>
                               <option value="live">Completed</option>
                               <option value="lost">Lost</option>
                             </select>
@@ -2752,7 +2689,6 @@ export default function DashboardPage() {
                         >
                           <option value="not_contacted">Not Contacted</option>
                           <option value="pending">Contacted</option>
-                          <option value="callback">Callback</option>
                           <option value="live">Completed</option>
                           <option value="lost">Lost</option>
                         </select>

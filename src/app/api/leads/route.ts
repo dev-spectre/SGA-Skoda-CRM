@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { resolveLeadHandler, getCachedStaffUsers } from '@/lib/activity';
+import { getCategoryFilterConditions } from '@/lib/classification';
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,10 +28,8 @@ export async function GET(request: NextRequest) {
 
     const primaryOrder = (searchParams.get('primaryOrder') || searchParams.get('primarySort') || 'desc').toLowerCase() === 'asc' ? 'asc' : 'desc';
 
-    let secondaryField = searchParams.get('secondaryField') || searchParams.get('sortBy') || searchParams.get('sortField') || 'name';
-    if (secondaryField === 'createdAt' || secondaryField === 'date') {
-      secondaryField = 'name';
-    }
+    const rawSecondaryField = searchParams.get('secondaryField') || searchParams.get('sortBy') || searchParams.get('sortField') || '';
+    const secondaryField = (rawSecondaryField === 'createdAt' || rawSecondaryField === 'date') ? '' : rawSecondaryField;
 
     const rawSecondaryOrder = searchParams.get('secondaryOrder') || searchParams.get('sortOrder') || searchParams.get('sort') || 'asc';
     const secondaryOrder: 'asc' | 'desc' = rawSecondaryOrder.toLowerCase() === 'desc' ? 'desc' : 'asc';
@@ -56,14 +55,19 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     const validFields = ['name', 'city', 'adname', 'branch', 'status', 'phone', 'followUpDate1', 'followUpDate2'];
-    if (!validFields.includes(secondaryField)) {
-      secondaryField = 'name';
+    let orderBy: any[];
+    if (secondaryField && validFields.includes(secondaryField) && secondaryField !== 'createdAt') {
+      orderBy = [
+        { [secondaryField]: secondaryOrder },
+        { createdAt: primaryOrder as 'asc' | 'desc' },
+        { id: primaryOrder as 'asc' | 'desc' },
+      ];
+    } else {
+      orderBy = [
+        { createdAt: primaryOrder as 'asc' | 'desc' },
+        { id: primaryOrder as 'asc' | 'desc' },
+      ];
     }
-
-    const orderBy = [
-      { createdAt: primaryOrder as 'asc' | 'desc' },
-      { [secondaryField]: secondaryOrder },
-    ];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const statsWhere: any = {};
@@ -337,13 +341,8 @@ export async function GET(request: NextRequest) {
     (rawConsultants as { branch: string | null }[]).forEach((c) => addBranch(c.branch));
     (rawUsers as { assignedBranch: string | null }[]).forEach((u) => addBranch(u.assignedBranch));
 
-    const validBranchCondition: any = {
-      branch: { in: activeBranchNames },
-    };
-
-    const unassignedBranchCondition: any = {
-      branch: { notIn: activeBranchNames },
-    };
+    // Outside and Valid Tamil Nadu location conditions
+    const { outsideLocationCondition, validLocationCondition } = await getCategoryFilterConditions();
 
     const validPhoneCondition: any = {
       isInvalidPhone: false,
@@ -403,8 +402,7 @@ export async function GET(request: NextRequest) {
     if (category === 'valid') {
       where.AND = [
         ...(where.AND || []),
-        validPhoneCondition,
-        validBranchCondition,
+        validLocationCondition,
       ];
     } else if (category === 'invalid') {
       where.AND = [
@@ -414,14 +412,12 @@ export async function GET(request: NextRequest) {
     } else if (category === 'outside' || category === 'unassigned') {
       where.AND = [
         ...(where.AND || []),
-        validPhoneCondition,
-        unassignedBranchCondition,
+        outsideLocationCondition,
       ];
     } else if (category === 'priority') {
       where.AND = [
         ...(where.AND || []),
-        validPhoneCondition,
-        validBranchCondition,
+        validLocationCondition,
         priorityFollowUpCondition,
       ];
     }
@@ -446,7 +442,6 @@ export async function GET(request: NextRequest) {
       remark: true,
       status: true,
       assignedConsultant: true,
-      handledBy: true,
       testDrive: true,
       isInvalidPhone: true,
       createdAt: true,
@@ -554,14 +549,13 @@ export async function GET(request: NextRequest) {
             updatedAt: true,
           },
         }),
-        // 1. Valid: leads with valid phone + active branch
+        // 1. Valid: leads with valid phone and inside Tamil Nadu
         prisma.lead.count({
           where: {
             ...statsWhere,
             AND: [
               ...(statsWhere.AND || []),
-              validPhoneCondition,
-              validBranchCondition,
+              validLocationCondition,
             ],
           },
         }),
@@ -575,14 +569,13 @@ export async function GET(request: NextRequest) {
             ],
           },
         }),
-        // 3. Outside: leads with valid phone + unassigned branch
+        // 3. Outside: leads with valid phone and outside Tamil Nadu
         prisma.lead.count({
           where: {
             ...statsWhere,
             AND: [
               ...(statsWhere.AND || []),
-              validPhoneCondition,
-              unassignedBranchCondition,
+              outsideLocationCondition,
             ],
           },
         }),
@@ -596,8 +589,7 @@ export async function GET(request: NextRequest) {
             ...statsWhere,
             AND: [
               ...(statsWhere.AND || []),
-              validPhoneCondition,
-              validBranchCondition,
+              validLocationCondition,
               priorityFollowUpCondition,
             ],
           },

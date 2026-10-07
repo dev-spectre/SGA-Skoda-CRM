@@ -641,7 +641,17 @@ export async function findAndWriteToSheetRow(
     : {};
 
   // STRICT RULE: ONLY permitted to write back CRM-managed fields:
-  // remark, followUpDate1, followUpDate2, status, testDrive, assignedConsultant
+  // remark, followUpDate1, followUpDate2, status, testDrive, assignedConsultant.
+  // CRITICAL ARCHITECTURAL GUARD: Read-only source columns (branch, name, phone, city,
+  // adname, platform, createdAt) must NEVER under any circumstances be written to!
+  const sourceCols = new Set<number>();
+  const sourceKeys = ['branch', 'name', 'phone', 'city', 'adname', 'platform', 'createdAt'] as const;
+  for (const k of sourceKeys) {
+    if (mapping[k] !== undefined && mapping[k] >= 0) {
+      sourceCols.add(mapping[k]);
+    }
+  }
+
   const allowedCols = new Set<number>();
   if (mapping.remark !== undefined && mapping.remark >= 0) allowedCols.add(mapping.remark);
   if (mapping.status !== undefined && mapping.status >= 0) allowedCols.add(mapping.status);
@@ -649,6 +659,11 @@ export async function findAndWriteToSheetRow(
   if (mapping.followUpDate2 !== undefined && mapping.followUpDate2 >= 0) allowedCols.add(mapping.followUpDate2);
   if (mapping.testDrive !== undefined && mapping.testDrive >= 0) allowedCols.add(mapping.testDrive);
   if (mapping.assignedConsultant !== undefined && mapping.assignedConsultant >= 0) allowedCols.add(mapping.assignedConsultant);
+
+  // Strip any column that collides with a read-only source column
+  for (const sc of sourceCols) {
+    allowedCols.delete(sc);
+  }
 
   const safeUpdates = updates.filter(u => allowedCols.has(u.col));
   if (safeUpdates.length === 0) return null;

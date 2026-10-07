@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { parsePhoneNumber } from '@/lib/utils';
+import { getCategoryFilterConditions } from '@/lib/classification';
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest) {
     const since = searchParams.get('since');
     const search = searchParams.get('search') || '';
     const status = searchParams.get('status') || '';
+    const category = (searchParams.get('category') || '').trim().toLowerCase();
     const consultant = searchParams.get('consultant') || '';
     const branchParam = searchParams.get('branch') || '';
     const testDrive = searchParams.get('testDrive') || '';
@@ -60,6 +62,7 @@ export async function GET(request: NextRequest) {
           OR: [
             { followUpDate1: { not: null } },
             { followUpDate2: { not: null } },
+            { followUps: { some: {} } },
           ]
         }
       ];
@@ -142,9 +145,31 @@ export async function GET(request: NextRequest) {
         where.status = { in: ['live', 'closed_successful'] };
       } else if (status === 'lost' || status === 'closed_unsuccessful') {
         where.status = { in: ['lost', 'closed_unsuccessful'] };
+      } else if (status === 'callback') {
+        where.status = 'callback';
       } else {
         where.status = status;
       }
+    }
+
+    // Apply category filter to where clause
+    const { outsideLocationCondition, validLocationCondition } = await getCategoryFilterConditions();
+
+    if (category === 'valid') {
+      where.AND = [
+        ...(where.AND || []),
+        validLocationCondition,
+      ];
+    } else if (category === 'outside' || category === 'unassigned') {
+      where.AND = [
+        ...(where.AND || []),
+        outsideLocationCondition,
+      ];
+    } else if (category === 'invalid') {
+      where.AND = [
+        ...(where.AND || []),
+        { isInvalidPhone: true },
+      ];
     }
 
     // Step 1: Lightweight aggregate check
@@ -174,7 +199,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Fetch changed leads and fresh stats in parallel
-        const [changedLeads, statusCounts] = await Promise.all([
+        const [changedLeads, statusCounts, validCount, invalidCount, outsideCount, allCount] = await Promise.all([
           prisma.lead.findMany({
             where: {
               ...where,
@@ -189,6 +214,11 @@ export async function GET(request: NextRequest) {
               branch: true,
               followUpDate1: true,
               followUpDate2: true,
+              followUpCount: true,
+              followUps: {
+                orderBy: { step: 'asc' as const },
+                select: { id: true, step: true, date: true, createdAt: true, updatedAt: true },
+              },
               remark: true,
               status: true,
               testDrive: true,
@@ -200,10 +230,12 @@ export async function GET(request: NextRequest) {
                 select: { id: true, username: true }
               },
               uploadedAt: true,
+              isInvalidPhone: true,
+              isBranchManual: true,
               createdAt: true,
               updatedAt: true,
             },
-            orderBy: { updatedAt: 'desc' },
+            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
             take: 50,
           }),
           prisma.lead.groupBy({
@@ -213,6 +245,10 @@ export async function GET(request: NextRequest) {
               status: true,
             },
           }),
+          prisma.lead.count({ where: validLocationCondition }),
+          prisma.lead.count({ where: { isInvalidPhone: true } }),
+          prisma.lead.count({ where: outsideLocationCondition }),
+          prisma.lead.count(),
         ]);
 
         if (changedLeads.length === 0) {
@@ -229,6 +265,7 @@ export async function GET(request: NextRequest) {
         let pendingLeads = 0;
         let liveLeads = 0;
         let lostLeads = 0;
+        let callbackLeads = 0;
 
         statusCounts.forEach((group) => {
           const c = group._count.status;
@@ -241,6 +278,8 @@ export async function GET(request: NextRequest) {
             liveLeads += c;
           } else if (['lost', 'closed_unsuccessful'].includes(group.status)) {
             lostLeads += c;
+          } else if (group.status === 'callback') {
+            callbackLeads += c;
           }
         });
 
@@ -250,9 +289,17 @@ export async function GET(request: NextRequest) {
           pending: pendingLeads,
           live: liveLeads,
           lost: lostLeads,
+          callback: callbackLeads,
           open: pendingLeads,
           closedSuccessful: liveLeads,
           closedUnsuccessful: lostLeads,
+          categories: {
+            valid: validCount,
+            invalid: invalidCount,
+            outside: outsideCount,
+            all: allCount,
+            priority: 0,
+          },
         };
 
         return NextResponse.json({

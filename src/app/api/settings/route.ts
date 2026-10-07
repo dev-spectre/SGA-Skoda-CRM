@@ -77,9 +77,35 @@ export async function PATCH(request: NextRequest) {
     }
     
     if (columnMapping !== undefined) {
-      updateData.columnMapping = typeof columnMapping === 'string' 
-        ? columnMapping 
-        : JSON.stringify(columnMapping);
+      let mappingObj: Record<string, number> = {};
+      try {
+        mappingObj = typeof columnMapping === 'string' ? JSON.parse(columnMapping) : columnMapping;
+      } catch {
+        return NextResponse.json({ error: 'Invalid columnMapping JSON format' }, { status: 400 });
+      }
+
+      // Safeguard: no two fields can share the same column index, and CRM writeback fields
+      // (assignedConsultant, testDrive, remark, status, followUpDate1, followUpDate2)
+      // must NEVER collide with read-only source columns (branch, name, phone, city, adname, platform, createdAt).
+      const sourceFields = ['branch', 'name', 'phone', 'city', 'adname', 'platform', 'createdAt'] as const;
+      const sourceColMap = new Map<number, string>();
+      for (const sf of sourceFields) {
+        const col = mappingObj[sf];
+        if (col !== undefined && col >= 0) {
+          sourceColMap.set(col, sf);
+        }
+      }
+
+      const writebackFields = ['assignedConsultant', 'testDrive', 'remark', 'status', 'followUpDate1', 'followUpDate2'] as const;
+      for (const wf of writebackFields) {
+        const col = mappingObj[wf];
+        if (col !== undefined && col >= 0 && sourceColMap.has(col)) {
+          console.warn(`[Settings Guard] Stripped colliding writeback mapping: ${wf} collides with source '${sourceColMap.get(col)}' at col ${col}`);
+          delete mappingObj[wf];
+        }
+      }
+
+      updateData.columnMapping = JSON.stringify(mappingObj);
     }
     
     const settings = await prisma.settings.upsert({

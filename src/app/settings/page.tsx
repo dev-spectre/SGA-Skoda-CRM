@@ -39,6 +39,8 @@ const CRM_SETTINGS_FIELDS = [
   { key: "createdAt", label: "Created Date", required: false, icon: "📅", hints: ["date", "created", "timestamp", "time", "created at"] },
   { key: "followUpDate1", label: "Follow Up Date 1", required: false, icon: "⏰", hints: ["follow up 1", "followup 1", "next follow up 1", "date 1"] },
   { key: "followUpDate2", label: "Follow Up Date 2", required: false, icon: "⏰", hints: ["follow up 2", "followup 2", "next follow up 2", "date 2"] },
+  { key: "assignedConsultant", label: "Assigned Consultant", required: false, icon: "👔", hints: ["consultant", "sales consultant", "sc", "advisor", "assigned to"] },
+  { key: "testDrive", label: "Test Drive", required: false, icon: "🚗", hints: ["test drive", "td", "testdrive"] },
 ];
 
 function SettingsContent() {
@@ -523,6 +525,18 @@ function onFormSubmit(e) {
   };
 
   const handleSaveMapping = async () => {
+    // Validate mapping: No two distinct fields can map to the same column
+    const usedCols = new Map<number, string>();
+    for (const [key, col] of Object.entries(mapping)) {
+      if (col !== undefined && col >= 0) {
+        if (usedCols.has(col)) {
+          showToast(`Conflict: "${key}" and "${usedCols.get(col)}" cannot share column ${col}!`, "error");
+          return;
+        }
+        usedCols.set(col, key);
+      }
+    }
+
     setSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -533,7 +547,8 @@ function onFormSubmit(e) {
       if (res.ok) {
         showToast("Column mapping saved successfully!");
       } else {
-        showToast("Failed to save mapping", "error");
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || "Failed to save mapping", "error");
       }
     } catch {
       showToast("Failed to save", "error");

@@ -791,7 +791,6 @@ export default function CalendarPage() {
                           >
                             <option value="not_contacted">Not Contacted</option>
                             <option value="pending">Contacted</option>
-                            <option value="callback">Callback</option>
                             <option value="live">Completed</option>
                             <option value="lost">Lost</option>
                           </select>

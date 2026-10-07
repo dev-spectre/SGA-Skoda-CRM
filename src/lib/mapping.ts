@@ -55,14 +55,22 @@ export async function computeIntelligentMapping(
     assignedConsultant: [/^assigned\s?_?consultant$/i, /^consultant$/i, /^sales\s?_?consultant$/i, /^sc$/i, /consultant|sales\s?person|advisor/i],
   };
 
+  const usedIndices = new Set<number>();
+
   // Phase 1: Header Matching with Priority
   for (const [field, regexes] of Object.entries(regexMap)) {
     const key = field as keyof ColumnMapping;
     for (const regex of regexes) {
-      const matchIndex = headers.findIndex((h: string) => regex.test(h));
+      const matchIndex = headers.findIndex((h: string, idx: number) => !usedIndices.has(idx) && regex.test(h));
       if (matchIndex !== -1) {
         if (key === 'name' && /ad_name|campaign_name|ad name|campaign name/i.test(headers[matchIndex])) {
           continue; // skip this match and keep trying
+        }
+        if (key === 'branch' && /consultant|sales\s?person|advisor/i.test(headers[matchIndex])) {
+          continue;
+        }
+        if (key === 'assignedConsultant' && /branch|showroom|outlet|office|dealer/i.test(headers[matchIndex])) {
+          continue;
         }
         if (key === 'platform') {
           // Check if data rows in this column look like dates
@@ -75,6 +83,7 @@ export async function computeIntelligentMapping(
           }
         }
         mapping[key] = matchIndex;
+        usedIndices.add(matchIndex);
         break;
       }
     }
@@ -83,29 +92,29 @@ export async function computeIntelligentMapping(
   // Phase 2: Data Sniffing for missing core fields
   if (mapping.phone === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
-      if (Object.values(mapping).includes(c)) continue;
+      if (usedIndices.has(c)) continue;
       const isPhone = dataRows.some((row: unknown[]) => {
         const val = String((row as unknown[])[c] || '').replace(/\D/g, '');
         return val.length >= 10 && val.length <= 15;
       });
-      if (isPhone) { mapping.phone = c; break; }
+      if (isPhone) { mapping.phone = c; usedIndices.add(c); break; }
     }
   }
 
   if (mapping.createdAt === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
-      if (Object.values(mapping).includes(c)) continue;
+      if (usedIndices.has(c)) continue;
       const isDate = dataRows.some((row: unknown[]) => {
         const val = String((row as unknown[])[c] || '').trim();
         return val && !isNaN(new Date(val).getTime()) && val.includes('-');
       });
-      if (isDate) { mapping.createdAt = c; break; }
+      if (isDate) { mapping.createdAt = c; usedIndices.add(c); break; }
     }
   }
 
   if (mapping.platform === undefined) {
     for (let c = 0; c <= maxColIndex; c++) {
-      if (Object.values(mapping).includes(c)) continue;
+      if (usedIndices.has(c)) continue;
       // Skip columns that contain date-like strings
       const containsDates = dataRows.some((row: unknown[]) => {
         const val = String((row as unknown[])[c] || '').trim();
@@ -128,7 +137,7 @@ export async function computeIntelligentMapping(
           val.includes('ads')
         );
       });
-      if (isPlatform) { mapping.platform = c; break; }
+      if (isPlatform) { mapping.platform = c; usedIndices.add(c); break; }
     }
   }
 

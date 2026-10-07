@@ -4,6 +4,10 @@ export function isInvalidPhoneNumber(phone: string | null | undefined): boolean 
   if (!parsed || parsed === 'Test Lead Phone') return true;
   const parsedDigits = parsed.replace(/\D/g, '');
   if (parsedDigits.length !== 10) return true;
+  // All identical repeating digits (e.g. 0000000000, 1111111111)
+  if (/^(\d)\1{9}$/.test(parsedDigits)) return true;
+  // Valid Indian mobile numbers start with 6, 7, 8, or 9
+  if (!/^[6-9]/.test(parsedDigits)) return true;
   const rawDigits = String(phone).replace(/\D/g, '');
   if (rawDigits.length > 10 && parsed.length > 10) return true;
   return false;
@@ -81,7 +85,7 @@ export function parseBranches(branchStr: string | null | undefined): string[] {
   return Array.from(new Set(parsed));
 }
 
-export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'live' | 'lost' | 'callback' {
+export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'live' | 'lost' {
   if (!rawStatusStr) return 'not_contacted';
 
   const norm = String(rawStatusStr).toLowerCase().replace(/[\s_]+/g, '').trim();
@@ -96,12 +100,12 @@ export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_
     return 'not_contacted';
   }
 
-  // callback / CALL BACK
+  // callback / CALL BACK -> maps to Contacted (pending)
   if (
     norm.includes('callback') ||
     norm === 'call_back'
   ) {
-    return 'callback';
+    return 'pending';
   }
 
   // 2. completed / COMPLETED -> completed ('live' in DB)
