@@ -169,6 +169,7 @@ export async function performSheetSync() {
     sheetId: true,
     isInvalidPhone: true,
     isBranchManual: true,
+    updatedAt: true,
   };
 
   const phonesArr = Array.from(candidatePhones);
@@ -331,11 +332,15 @@ export async function performSheetSync() {
         if (normExistingStatus === 'pending') formattedDbStatus = 'Contacted';
         else if (normExistingStatus === 'live') formattedDbStatus = 'Completed';
         else if (normExistingStatus === 'lost') formattedDbStatus = 'Lost';
+        else if (normExistingStatus === 'callback') formattedDbStatus = 'Callback';
 
         const rawSheetStatusStr = (row[mapping.status] || '').toString().trim();
         const normSheetStatus = parseSheetStatus(rawSheetStatusStr.toLowerCase());
 
-        if (rawSheetStatusStr && normSheetStatus !== normExistingStatus) {
+        // Prevent race-condition status reverts by checking if DB was recently updated
+        const isRecentlyUpdated = existing.updatedAt && (Date.now() - new Date(existing.updatedAt).getTime() < 60000);
+
+        if (rawSheetStatusStr && (normSheetStatus !== normExistingStatus || isRecentlyUpdated)) {
           corrections.push({ col: mapping.status, value: formattedDbStatus });
         }
       }

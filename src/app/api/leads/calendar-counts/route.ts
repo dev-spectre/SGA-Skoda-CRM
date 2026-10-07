@@ -91,6 +91,7 @@ export async function GET(request: NextRequest) {
         OR: [
           { followUpDate1: { gte: startDate, lte: endDate } },
           { followUpDate2: { gte: startDate, lte: endDate } },
+          { followUps: { some: { date: { gte: startDate, lte: endDate } } } },
         ],
       },
     ];
@@ -101,20 +102,35 @@ export async function GET(request: NextRequest) {
         id: true,
         followUpDate1: true,
         followUpDate2: true,
+        followUps: {
+          where: { date: { gte: startDate, lte: endDate } },
+          select: { date: true },
+        },
       },
     });
 
     const counts: Record<string, number> = {};
+    const startIso = toISTDateString(startDate);
+    const endIso = toISTDateString(endDate);
 
     for (const lead of leads) {
       const dates = new Set<string>();
+      if (Array.isArray(lead.followUps) && lead.followUps.length > 0) {
+        for (const fu of lead.followUps) {
+          if (fu.date) {
+            const d = toISTDateString(fu.date);
+            if (d && d >= startIso && d <= endIso) dates.add(d);
+          }
+        }
+      }
+      // Also include followUpDate1 and followUpDate2 for backward compat
       if (lead.followUpDate1) {
         const d1 = toISTDateString(lead.followUpDate1);
-        if (d1) dates.add(d1);
+        if (d1 && d1 >= startIso && d1 <= endIso) dates.add(d1);
       }
       if (lead.followUpDate2) {
         const d2 = toISTDateString(lead.followUpDate2);
-        if (d2) dates.add(d2);
+        if (d2 && d2 >= startIso && d2 <= endIso) dates.add(d2);
       }
       for (const d of dates) {
         counts[d] = (counts[d] || 0) + 1;

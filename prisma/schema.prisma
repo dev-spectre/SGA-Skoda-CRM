@@ -16,6 +16,7 @@ model Lead {
   branch             String         @default("")
   followUpDate1      DateTime?
   followUpDate2      DateTime?
+  followUpCount      Int            @default(0)
   remark             String?
   status             String         @default("not_contacted")
   sheetRow           Int?
@@ -35,6 +36,7 @@ model Lead {
   hiddenBy           HiddenLead[]
   uploadedBy         User?          @relation("UserUploadedLeads", fields: [uploadedById], references: [id])
   activities         LeadActivity[]
+  followUps          LeadFollowUp[]
 
   @@index([createdAt])
   @@index([updatedAt])
@@ -163,4 +165,18 @@ model LocationCache {
   @@index([searchTerm])
   @@index([canonicalName])
   @@index([state])
+}
+
+model LeadFollowUp {
+  id        Int      @id @default(autoincrement())
+  leadId    Int
+  step      Int
+  date      DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([leadId, step])
+  @@index([leadId])
+  @@index([date])
 }

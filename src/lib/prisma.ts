@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import dns from 'dns';
 import { PrismaClient } from '@prisma/client';
 import { PrismaNeon } from '@prisma/adapter-neon';
@@ -13,6 +14,7 @@ export type ExtendedPrismaClient = PrismaClient & {
   consultant: any;
   branch: any;
   locationCache: any;
+  leadFollowUp?: any;
 };
 
 const globalForPrisma = globalThis as unknown as {
@@ -23,7 +25,17 @@ const globalForPrisma = globalThis as unknown as {
 function createPrismaClient(): ExtendedPrismaClient {
   let url = process.env.DATABASE_URL;
   if (!url) {
-    return new PrismaClient() as ExtendedPrismaClient;
+    try {
+      return new PrismaClient() as ExtendedPrismaClient;
+    } catch {
+      try {
+        const pool = new Pool({ connectionString: 'postgresql://postgres:postgres@localhost:5432/fallback' });
+        const adapter = new PrismaPg(pool);
+        return new PrismaClient({ adapter }) as ExtendedPrismaClient;
+      } catch {
+        return new PrismaClient({} as any) as ExtendedPrismaClient;
+      }
+    }
   }
 
   if (url.includes('neon.tech')) {

@@ -364,6 +364,45 @@ export async function resolveLocationTiered(
           };
         }
       }
+
+      // Fallback: Query prisma.locationCache directly if memory cache missed
+      const dbCached = await prisma.locationCache.findFirst({
+        where: {
+          OR: [
+            { searchTerm: searchKey },
+            { canonicalName: { equals: query, mode: 'insensitive' } },
+          ],
+        },
+      });
+
+      if (dbCached) {
+        const isTN = dbCached.state
+          ? isTamilNaduState(dbCached.state)
+          : isWithinTamilNaduBounds(dbCached.latitude, dbCached.longitude);
+
+        setCachedLocation(searchKey, {
+          canonicalName: dbCached.canonicalName,
+          district: dbCached.district,
+          state: dbCached.state,
+          latitude: dbCached.latitude,
+          longitude: dbCached.longitude,
+          source: (dbCached.source as any) || 'cache',
+          isTamilNadu: isTN,
+        }).catch(() => {});
+
+        return {
+          matched: true,
+          query,
+          canonicalName: dbCached.canonicalName,
+          district: dbCached.district,
+          state: dbCached.state,
+          latitude: dbCached.latitude,
+          longitude: dbCached.longitude,
+          source: 'cache',
+          confidence: 0.95,
+          isTamilNadu: isTN,
+        };
+      }
     } catch (err) {
       console.warn('In-memory LocationCache lookup warning:', err);
     }

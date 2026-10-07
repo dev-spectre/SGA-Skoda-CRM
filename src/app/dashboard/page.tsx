@@ -3,15 +3,18 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parsePhoneNumber, parseBranches } from "@/lib/utils";
 import { classifyLead, type LeadCategory } from "@/lib/classification";
+import {
+  formatToDDMMYYYY,
+  getFollowUpInputsState,
+  formatAllFollowUpsForExcel,
+  type FollowUpItem,
+} from "@/lib/followup";
 import BranchConsultantPicker from "@/components/BranchConsultantPicker";
 import MultiSelectDropdown from "@/components/MultiSelectDropdown";
 import { ExternalUploadModal } from "@/components/ExternalUploadModal";
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-
-
-
 
 interface Lead {
   id: number;
@@ -20,8 +23,10 @@ interface Lead {
   city: string;
   adname?: string;
   branch?: string;
-  followUpDate1?: string;
-  followUpDate2?: string;
+  followUpDate1?: string | null;
+  followUpDate2?: string | null;
+  followUpCount?: number;
+  followUps?: FollowUpItem[];
   remark: string | null;
   status: string;
   createdAt: string;
@@ -59,6 +64,7 @@ interface Stats {
   pending?: number;
   live?: number;
   lost?: number;
+  callback?: number;
   open?: number;
   closedSuccessful?: number;
   closedUnsuccessful?: number;
@@ -78,11 +84,25 @@ interface Pagination {
   totalPages: number;
 }
 
+const matchBranchFilter = (leadBranch: string | undefined, filter: string) => {
+  if (!filter) return true;
+  if (!leadBranch) return false;
+  const filterTokens = filter.split(',').map(b => b.trim().toLowerCase()).filter(Boolean);
+  if (filterTokens.length === 0) return true;
+  const leadBranches = parseBranches(leadBranch).map(b => b.toLowerCase().trim());
+  const rawLower = leadBranch.toLowerCase().trim();
+  return filterTokens.some(ft =>
+    leadBranches.some(lb => lb.includes(ft) || ft.includes(lb)) ||
+    rawLower.includes(ft)
+  );
+};
+
 const formatStatusLabel = (st: string) => {
   if (st === 'not_contacted' || st === 'created') return 'Not Contacted';
   if (st === 'pending') return 'Contacted';
   if (st === 'live' || st === 'closed_successful') return 'Completed';
   if (st === 'lost' || st === 'closed_unsuccessful') return 'Lost';
+  if (st === 'callback') return 'Callback';
   return st.replace('_', ' ');
 };
 
@@ -611,8 +631,17 @@ export default function DashboardPage() {
         globalDashboardPageCache[filterKey].timestamp = Date.now();
 
         if (data.stats) {
-          globalDashboardPageCache[filterKey].stats = data.stats;
-          setStats(data.stats);
+          const mergedStats: Stats = {
+            ...(cachedFilter?.stats || {}),
+            ...data.stats,
+            categories: (data.stats.categories && data.stats.categories.all > 0)
+              ? data.stats.categories
+              : (cachedFilter?.stats?.categories || data.stats.categories || stats.categories),
+          };
+          globalDashboardPageCache[filterKey].stats = mergedStats;
+          setStats(mergedStats);
+        } else if (cachedFilter?.stats) {
+          setStats(cachedFilter.stats);
         }
 
         if (data.pagination && data.pagination.total !== undefined && !hasStatsAlready) {
@@ -747,7 +776,11 @@ export default function DashboardPage() {
 
         // 1. Immediately update dashboard stat cards with fresh counts
         if (data.stats) {
-          setStats(data.stats);
+          setStats(prev => ({
+            ...prev,
+            ...data.stats,
+            categories: prev?.categories || data.stats.categories,
+          }));
         }
 
         // 2. Patch changed leads directly in-place without refetching from DB
@@ -820,11 +853,24 @@ export default function DashboardPage() {
       params.set("primaryOrder", primaryOrder);
       params.set("secondaryField", secondaryField);
       params.set("secondaryOrder", secondaryOrder);
+      if (statusFilter) params.set("status", statusFilter);
       if (category && category !== "all") params.set("category", category);
       if (search) params.set("search", search);
       if (branchFilter) params.set("branch", branchFilter);
       if (consultantFilter) params.set("consultant", consultantFilter);
       if (testDriveFilter) params.set("testDrive", testDriveFilter);
+      if (uploaderFilter) {
+        if (uploaderFilter === 'system') {
+          params.set('source', 'System');
+        } else if (uploaderFilter === 'external') {
+          params.set('source', 'External Upload');
+        } else if (uploaderFilter.startsWith('user:')) {
+          params.set('uploader', uploaderFilter.replace('user:', ''));
+        } else {
+          params.set('uploader', uploaderFilter);
+        }
+      }
+      if (platformFilter) params.set("platform", platformFilter);
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
 
@@ -890,6 +936,18 @@ export default function DashboardPage() {
       };
     }
 
+    for (const key of Object.keys(globalDashboardPageCache)) {
+      const cStats = globalDashboardPageCache[key]?.stats;
+      if (cStats?.categories && cStats.categories.all > 0) {
+        return {
+          valid: cStats.categories.valid ?? 0,
+          invalid: cStats.categories.invalid ?? 0,
+          outside: cStats.categories.outside ?? 0,
+          all: cStats.categories.all ?? 0,
+        };
+      }
+    }
+
     let vCount = 0;
     let iCount = 0;
     let oCount = 0;
@@ -911,9 +969,9 @@ export default function DashboardPage() {
       valid: vCount,
       invalid: iCount,
       outside: oCount,
-      all: leads.length,
+      all: pagination.total || leads.length,
     };
-  }, [stats?.categories, leads, branches]);
+  }, [stats?.categories, leads, branches, pagination.total]);
 
   const getConsultantGroupsForLead = useCallback((lead: Lead) => {
     // 1. Parse lead branches
@@ -1046,7 +1104,7 @@ export default function DashboardPage() {
   const displayedLeads = useMemo(() => {
     let result = leads;
     if (branchFilter) {
-      result = result.filter(l => l.branch && parseBranches(l.branch).includes(branchFilter));
+      result = result.filter(l => matchBranchFilter(l.branch, branchFilter));
     }
     if (!result || result.length === 0) return result;
 
@@ -1063,20 +1121,20 @@ export default function DashboardPage() {
 
       // Secondary order: sort same day data by secondaryField category
       if (secondaryField) {
-        let valA: any = a[secondaryField as keyof Lead];
-        let valB: any = b[secondaryField as keyof Lead];
+        const rawValA: any = a[secondaryField as keyof Lead];
+        const rawValB: any = b[secondaryField as keyof Lead];
 
         if (secondaryField === "followUpDate1" || secondaryField === "followUpDate2" || secondaryField === "createdAt") {
-          const tA = valA ? new Date(valA).getTime() : 0;
-          const tB = valB ? new Date(valB).getTime() : 0;
+          const tA = rawValA ? new Date(rawValA).getTime() : 0;
+          const tB = rawValB ? new Date(rawValB).getTime() : 0;
           if (tA !== tB) {
             return secondaryOrder === "asc" ? tA - tB : tB - tA;
           }
         } else {
-          valA = (valA ?? "").toString().toLowerCase().trim();
-          valB = (valB ?? "").toString().toLowerCase().trim();
-          if (valA !== valB) {
-            return secondaryOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+          const strA = (rawValA ?? "").toString().toLowerCase().trim();
+          const strB = (rawValB ?? "").toString().toLowerCase().trim();
+          if (strA !== strB) {
+            return secondaryOrder === "asc" ? strA.localeCompare(strB) : strB.localeCompare(strA);
           }
         }
       }
@@ -1101,7 +1159,7 @@ export default function DashboardPage() {
 
     const exportLeads = allLeads.filter((l: Lead) => {
       if (!branchFilter) return true;
-      return l.branch && parseBranches(l.branch).includes(branchFilter);
+      return matchBranchFilter(l.branch, branchFilter);
     });
 
     if (exportLeads.length === 0) {
@@ -1110,14 +1168,48 @@ export default function DashboardPage() {
       return;
     }
 
+    // Sort exported leads to match the table's current sort order
+    exportLeads.sort((a: Lead, b: Lead) => {
+      const dayA = toISTDateString(a.createdAt);
+      const dayB = toISTDateString(b.createdAt);
+
+      if (dayA !== dayB) {
+        return primaryOrder === "desc" ? dayB.localeCompare(dayA) : dayA.localeCompare(dayB);
+      }
+
+      if (secondaryField) {
+        const rawValA: any = a[secondaryField as keyof Lead];
+        const rawValB: any = b[secondaryField as keyof Lead];
+
+        if (secondaryField === "followUpDate1" || secondaryField === "followUpDate2" || secondaryField === "createdAt") {
+          const tA = rawValA ? new Date(rawValA).getTime() : 0;
+          const tB = rawValB ? new Date(rawValB).getTime() : 0;
+          if (tA !== tB) {
+            return secondaryOrder === "asc" ? tA - tB : tB - tA;
+          }
+        } else {
+          const strA = (rawValA ?? "").toString().toLowerCase().trim();
+          const strB = (rawValB ?? "").toString().toLowerCase().trim();
+          if (strA !== strB) {
+            return secondaryOrder === "asc" ? strA.localeCompare(strB) : strB.localeCompare(strA);
+          }
+        }
+      }
+
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return primaryOrder === "desc" ? timeB - timeA : timeA - timeB;
+    });
+
     const exportData = exportLeads.map((l: Lead) => ({
       Name: l.name,
       Phone: l.phone,
       City: l.city || "-",
       "Ad Name": l.adname || "-",
       Branch: l.branch ? parseBranches(l.branch).join(", ") : "-",
-      "Follow Up 1": toISTDateString(l.followUpDate1) || "-",
-      "Follow Up 2": toISTDateString(l.followUpDate2) || "-",
+      "Assigned Consultant": l.assignedConsultant || "-",
+      "Test Drive": l.testDrive || "-",
+      "Follow Ups": formatAllFollowUpsForExcel(l.followUps, { followUpDate1: l.followUpDate1, followUpDate2: l.followUpDate2 }),
       "Created At": formatDate(l.createdAt),
       Status: formatStatusLabel(l.status),
       Remark: l.remark || "-"
@@ -1127,7 +1219,31 @@ export default function DashboardPage() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Leads");
 
-    const cols = Object.keys(exportData[0]).map(() => ({ wch: 15 }));
+    // Apply vertical alignment and wrapText to all cells
+    if (worksheet['!ref']) {
+      const range = XLSX.utils.decode_range(worksheet['!ref']);
+      for (let R = range.s.r; R <= range.e.r; ++R) {
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = worksheet[cellAddress];
+          if (cell) {
+            cell.s = {
+              alignment: {
+                vertical: "top",
+                wrapText: true,
+              },
+            };
+          }
+        }
+      }
+    }
+
+    const cols = Object.keys(exportData[0]).map((key) => {
+      if (key === "Follow Ups") return { wch: 25 };
+      if (key === "Remark") return { wch: 30 };
+      if (key === "Name" || key === "Assigned Consultant") return { wch: 20 };
+      return { wch: 15 };
+    });
     worksheet['!cols'] = cols;
 
     XLSX.writeFile(workbook, "SGA_Skoda_Leads.xlsx");
@@ -1146,7 +1262,7 @@ export default function DashboardPage() {
 
     const exportLeads = allLeads.filter((l: Lead) => {
       if (!branchFilter) return true;
-      return l.branch && parseBranches(l.branch).includes(branchFilter);
+      return matchBranchFilter(l.branch, branchFilter);
     });
 
     if (exportLeads.length === 0) {
@@ -1223,6 +1339,170 @@ export default function DashboardPage() {
     }
   };
 
+  const toDateStringOrUndefined = (d?: Date | string | null): string | undefined => {
+    if (!d) return undefined;
+    return typeof d === "string" ? d : d.toISOString();
+  };
+
+  const handleFollowUpStepChange = async (lead: Lead, step: number, dateStr: string) => {
+    if (!dateStr) {
+      handleClearFollowUp(lead, step);
+      return;
+    }
+
+    const prevLeads = [...leads];
+    startUpdating();
+    activeFetchIdRef.current++;
+
+    const currentFollowUps = lead.followUps ? [...lead.followUps] : [];
+    const existingIdx = currentFollowUps.findIndex(f => f.step === step);
+    if (existingIdx >= 0) {
+      currentFollowUps[existingIdx] = { ...currentFollowUps[existingIdx], date: dateStr };
+    } else {
+      currentFollowUps.push({ step, date: dateStr });
+    }
+    currentFollowUps.sort((a, b) => a.step - b.step);
+
+    const firstDate = currentFollowUps[0]?.date || null;
+    const latestDate = currentFollowUps.length > 1 ? currentFollowUps[currentFollowUps.length - 1]?.date : null;
+
+    patchLeadInCache({
+      id: lead.id,
+      followUps: currentFollowUps,
+      followUpCount: currentFollowUps.length,
+      followUpDate1: toDateStringOrUndefined(firstDate),
+      followUpDate2: toDateStringOrUndefined(latestDate),
+    });
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          updateFollowUp: { step, date: dateStr },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(`Follow-up ${step} updated`);
+        if (data.lead) {
+          patchLeadInCache(data.lead);
+        }
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("crm-leads-updated"));
+        }
+      } else {
+        showToast(data.error || data.details || "Failed to update date", "error");
+        setLeads(prevLeads);
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to update date", "error");
+      setLeads(prevLeads);
+    } finally {
+      stopUpdating();
+    }
+  };
+
+  const handleAddNewFollowUp = async (lead: Lead, targetStep: number, dateStr: string) => {
+    if (!dateStr) return;
+
+    const prevLeads = [...leads];
+    startUpdating();
+    activeFetchIdRef.current++;
+
+    const currentFollowUps = lead.followUps ? [...lead.followUps] : [];
+    currentFollowUps.push({ step: targetStep, date: dateStr });
+    currentFollowUps.sort((a, b) => a.step - b.step);
+
+    const firstDate = currentFollowUps[0]?.date || null;
+    const latestDate = currentFollowUps.length > 1 ? currentFollowUps[currentFollowUps.length - 1]?.date : null;
+
+    patchLeadInCache({
+      id: lead.id,
+      followUps: currentFollowUps,
+      followUpCount: currentFollowUps.length,
+      followUpDate1: toDateStringOrUndefined(firstDate),
+      followUpDate2: toDateStringOrUndefined(latestDate),
+    });
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          newFollowUpDate: { date: dateStr, step: targetStep },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(`Follow-up ${targetStep} added`);
+        if (data.lead) {
+          patchLeadInCache(data.lead);
+        }
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("crm-leads-updated"));
+        }
+      } else {
+        showToast(data.error || data.details || "Failed to add follow-up", "error");
+        setLeads(prevLeads);
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to add follow-up", "error");
+      setLeads(prevLeads);
+    } finally {
+      stopUpdating();
+    }
+  };
+
+  const handleClearFollowUp = async (lead: Lead, step: number) => {
+    const prevLeads = [...leads];
+    startUpdating();
+    activeFetchIdRef.current++;
+
+    const currentFollowUps = (lead.followUps ? [...lead.followUps] : [])
+      .filter(f => f.step !== step)
+      .map((f, i) => ({ ...f, step: i + 1 }));
+
+    const firstDate = currentFollowUps.length > 0 ? currentFollowUps[0].date : null;
+    const latestDate = currentFollowUps.length > 1 ? currentFollowUps[currentFollowUps.length - 1].date : null;
+
+    patchLeadInCache({
+      id: lead.id,
+      followUps: currentFollowUps,
+      followUpCount: currentFollowUps.length,
+      followUpDate1: toDateStringOrUndefined(firstDate),
+      followUpDate2: toDateStringOrUndefined(latestDate),
+    });
+
+    try {
+      const res = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deleteFollowUpStep: step,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(`Follow-up ${step} cleared`);
+        if (data.lead) {
+          patchLeadInCache(data.lead);
+        }
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("crm-leads-updated"));
+        }
+      } else {
+        showToast(data.error || data.details || "Failed to clear follow-up", "error");
+        setLeads(prevLeads);
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to clear follow-up", "error");
+      setLeads(prevLeads);
+    } finally {
+      stopUpdating();
+    }
+  };
+
   const handleFollowUpUpdate = async (lead: Lead, field: 'followUpDate1' | 'followUpDate2', dateStr: string) => {
     const prevLeads = [...leads];
     startUpdating();
@@ -1242,6 +1522,9 @@ export default function DashboardPage() {
         if (data.lead) {
           patchLeadInCache(data.lead);
         }
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("crm-leads-updated"));
+        }
       } else {
         showToast(data.error || data.details || "Failed to update date", "error");
         setLeads(prevLeads.map(l => (l.id === lead.id && data.handledBy) ? { ...l, handledBy: data.handledBy } : l));
@@ -1256,8 +1539,8 @@ export default function DashboardPage() {
 
   const handleStatusChange = async (lead: Lead, newStatus: string) => {
     const oldStatus = lead.status;
-    const normOld = (oldStatus === 'created' ? 'not_contacted' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus) as 'not_contacted' | 'pending' | 'live' | 'lost';
-    const normNew = (newStatus === 'created' ? 'not_contacted' : newStatus === 'closed_successful' ? 'live' : newStatus === 'closed_unsuccessful' ? 'lost' : newStatus) as 'not_contacted' | 'pending' | 'live' | 'lost';
+    const normOld = (oldStatus === 'created' ? 'not_contacted' : oldStatus === 'closed_successful' ? 'live' : oldStatus === 'closed_unsuccessful' ? 'lost' : oldStatus) as 'not_contacted' | 'pending' | 'live' | 'lost' | 'callback';
+    const normNew = (newStatus === 'created' ? 'not_contacted' : newStatus === 'closed_successful' ? 'live' : newStatus === 'closed_unsuccessful' ? 'lost' : newStatus) as 'not_contacted' | 'pending' | 'live' | 'lost' | 'callback';
 
     if (normOld === normNew) return;
 
@@ -1279,11 +1562,13 @@ export default function DashboardPage() {
       if (normOld === 'pending') updated.pending = Math.max(0, (updated.pending ?? 0) - 1);
       if (normOld === 'live') updated.live = Math.max(0, (updated.live ?? 0) - 1);
       if (normOld === 'lost') updated.lost = Math.max(0, (updated.lost ?? 0) - 1);
+      if (normOld === 'callback') updated.callback = Math.max(0, (updated.callback ?? 0) - 1);
 
       if (normNew === 'not_contacted') updated.notContacted = (updated.notContacted ?? 0) + 1;
       if (normNew === 'pending') updated.pending = (updated.pending ?? 0) + 1;
       if (normNew === 'live') updated.live = (updated.live ?? 0) + 1;
       if (normNew === 'lost') updated.lost = (updated.lost ?? 0) + 1;
+      if (normNew === 'callback') updated.callback = (updated.callback ?? 0) + 1;
 
       return updated;
     });
@@ -1495,10 +1780,14 @@ export default function DashboardPage() {
     try {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleDateString("en-IN", {
-        day: "2-digit", month: "short", year: "numeric",
-        hour: "2-digit", minute: "2-digit",
+      const datePart = formatToDDMMYYYY(d);
+      const timePart = d.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
       });
+      return `${datePart} ${timePart}`;
     } catch {
       return dateStr;
     }
@@ -1509,16 +1798,15 @@ export default function DashboardPage() {
     try {
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return dateStr;
-      return d.toLocaleString("en-IN", {
-        weekday: "long",
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
+      const datePart = formatToDDMMYYYY(d);
+      const timePart = d.toLocaleTimeString("en-IN", {
+        timeZone: "Asia/Kolkata",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
         hour12: true,
       });
+      return `${datePart} ${timePart}`;
     } catch {
       return dateStr;
     }
@@ -1536,10 +1824,15 @@ export default function DashboardPage() {
             {exportLoading ? <><span className="spinner" style={{width: 14, height: 14}}/> Exporting...</> : "Export PDF"}
           </button> */}
 
-          <button className="btn btn-primary" onClick={handleSync} disabled={syncing}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSync}
+            disabled={syncing}
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "8px" }}
+          >
             {syncing ? <><span className="spinner" /> Syncing...</> : (
               <>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18 }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 18, height: 18, flexShrink: 0, display: "block" }}>
                   <path d="M23 4v6h-6M1 20v-6h6" />
                   <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                 </svg>
@@ -1865,6 +2158,7 @@ export default function DashboardPage() {
             options={[
               { label: "Not Contacted", value: "not_contacted" },
               { label: "Contacted", value: "pending" },
+              { label: "Callback", value: "callback" },
               { label: "Completed", value: "live" },
               { label: "Lost", value: "lost" },
             ]}
@@ -2007,7 +2301,7 @@ export default function DashboardPage() {
               <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01" strokeWidth="2.5" strokeLinecap="round" />
             </svg>
             {startDate || endDate
-              ? (startDate === endDate ? startDate : `${startDate || "Start"} → ${endDate || "End"}`)
+              ? (startDate === endDate ? formatToDDMMYYYY(startDate) : `${formatToDDMMYYYY(startDate) || "Start"} → ${formatToDDMMYYYY(endDate) || "End"}`)
               : "Date Range"}
           </button>
 
@@ -2169,32 +2463,57 @@ export default function DashboardPage() {
                             </div>
                           </td>
                           <td>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>1.</span>
-                                <input
-                                  type="date"
-                                  value={toISTDateString(lead.followUpDate1)}
-                                  title={isLeadLocked ? `Locked by ${lead.handledBy}` : `Follow Up 1: ${toISTDateString(lead.followUpDate1) || 'No date set'}`}
-                                  onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
-                                  disabled={isLeadLocked}
-                                  className="status-select"
-                                  style={{ border: "1px solid var(--border)", background: "transparent", cursor: isLeadLocked ? "not-allowed" : "pointer", opacity: isLeadLocked ? 0.6 : 1, padding: "2px 6px", fontSize: "13px" }}
-                                />
-                              </div>
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ fontSize: "12px", color: "var(--text-secondary)", width: "12px" }}>2.</span>
-                                <input
-                                  type="date"
-                                  value={toISTDateString(lead.followUpDate2)}
-                                  title={isLeadLocked ? `Locked by ${lead.handledBy}` : `Follow Up 2: ${toISTDateString(lead.followUpDate2) || 'No date set'}`}
-                                  onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
-                                  disabled={isLeadLocked}
-                                  className="status-select"
-                                  style={{ border: "1px solid var(--border)", background: "transparent", cursor: isLeadLocked ? "not-allowed" : "pointer", opacity: isLeadLocked ? 0.6 : 1, padding: "2px 6px", fontSize: "13px" }}
-                                />
-                              </div>
-                            </div>
+                            {(() => {
+                              const { input1, input2 } = getFollowUpInputsState(lead.followUps, {
+                                followUpDate1: lead.followUpDate1,
+                                followUpDate2: lead.followUpDate2,
+                              });
+                              return (
+                                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", minWidth: "20px", fontWeight: 600 }}>{input1.label}.</span>
+                                    <input
+                                      type="date"
+                                      value={input1.isoDate}
+                                      title={isLeadLocked ? `Locked by ${lead.handledBy}` : `${input1.label}: ${input1.dateStr || 'No date set'}`}
+                                      onChange={(e) => {
+                                        if (input1.exists) {
+                                          handleFollowUpStepChange(lead, input1.step, e.target.value);
+                                        } else {
+                                          handleAddNewFollowUp(lead, input1.step, e.target.value);
+                                        }
+                                      }}
+                                      disabled={isLeadLocked}
+                                      className="status-select"
+                                      style={{ border: "1px solid var(--border)", background: "transparent", cursor: isLeadLocked ? "not-allowed" : "pointer", opacity: isLeadLocked ? 0.6 : 1, padding: "2px 6px", fontSize: "13px" }}
+                                    />
+                                    {input1.exists && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleClearFollowUp(lead, input1.step)}
+                                        disabled={isLeadLocked}
+                                        title={`Clear ${input1.label}`}
+                                        style={{ border: "none", background: "transparent", color: "var(--text-secondary)", cursor: isLeadLocked ? "not-allowed" : "pointer", padding: "0 2px", fontSize: "14px", lineHeight: 1 }}
+                                      >
+                                        ×
+                                      </button>
+                                    )}
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                                    <span style={{ fontSize: "11px", color: "var(--text-secondary)", minWidth: "20px", fontWeight: 600 }}>{input2.label}.</span>
+                                    <input
+                                      type="date"
+                                      value={input2.isoDate}
+                                      title={isLeadLocked ? `Locked by ${lead.handledBy}` : `${input2.label}: Add follow up`}
+                                      onChange={(e) => handleAddNewFollowUp(lead, input2.step, e.target.value)}
+                                      disabled={isLeadLocked}
+                                      className="status-select"
+                                      style={{ border: "1px solid var(--border)", background: "transparent", cursor: isLeadLocked ? "not-allowed" : "pointer", opacity: isLeadLocked ? 0.6 : 1, padding: "2px 6px", fontSize: "13px" }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td style={{ cursor: "pointer" }} title={getFullDateTooltip(lead.createdAt)}>
                             {formatDate(lead.createdAt)}
@@ -2203,7 +2522,8 @@ export default function DashboardPage() {
                             <select
                               className={`status-select ${(lead.status === "not_contacted" || lead.status === "created") ? "status-not_contacted" :
                                 lead.status === "pending" ? "status-pending" :
-                                  (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
+                                  (lead.status === "live" || lead.status === "closed_successful") ? "status-live" :
+                                  lead.status === "callback" ? "status-callback" : "status-lost"
                                 }`}
                               value={lead.status === 'created' ? 'not_contacted' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
                               onChange={(e) => handleStatusChange(lead, e.target.value)}
@@ -2213,6 +2533,7 @@ export default function DashboardPage() {
                             >
                               <option value="not_contacted">Not Contacted</option>
                               <option value="pending">Contacted</option>
+                              <option value="callback">Callback</option>
                               <option value="live">Completed</option>
                               <option value="lost">Lost</option>
                             </select>
@@ -2360,6 +2681,11 @@ export default function DashboardPage() {
                     lead.handledBy.trim().toLowerCase() !== username.trim().toLowerCase()
                   );
 
+                  const { input1, input2 } = getFollowUpInputsState(lead.followUps, {
+                    followUpDate1: lead.followUpDate1,
+                    followUpDate2: lead.followUpDate2,
+                  });
+
                   let plat = lead.platform && !/^\d{4}-\d{2}-\d{2}$/.test(lead.platform) && !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(lead.platform)
                     ? lead.platform.trim()
                     : "Unknown";
@@ -2416,7 +2742,8 @@ export default function DashboardPage() {
                         <select
                           className={`status-select ${(lead.status === "not_contacted" || lead.status === "created") ? "status-not_contacted" :
                             lead.status === "pending" ? "status-pending" :
-                              (lead.status === "live" || lead.status === "closed_successful") ? "status-live" : "status-lost"
+                              (lead.status === "live" || lead.status === "closed_successful") ? "status-live" :
+                              lead.status === "callback" ? "status-callback" : "status-lost"
                             }`}
                           value={lead.status === 'created' ? 'not_contacted' : lead.status === 'closed_successful' ? 'live' : lead.status === 'closed_unsuccessful' ? 'lost' : lead.status}
                           onChange={(e) => handleStatusChange(lead, e.target.value)}
@@ -2425,6 +2752,7 @@ export default function DashboardPage() {
                         >
                           <option value="not_contacted">Not Contacted</option>
                           <option value="pending">Contacted</option>
+                          <option value="callback">Callback</option>
                           <option value="live">Completed</option>
                           <option value="lost">Lost</option>
                         </select>
@@ -2491,11 +2819,30 @@ export default function DashboardPage() {
                       {/* Operational Inputs (Follow-ups, Test Drive, Assigned Consultant) */}
                       <div className="lead-mobile-controls-grid">
                         <div className="lead-mobile-control-item">
-                          <span className="lead-mobile-meta-label">Follow-Up 1</span>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span className="lead-mobile-meta-label">{input1.label}</span>
+                            {input1.exists && (
+                              <button
+                                type="button"
+                                onClick={() => handleClearFollowUp(lead, input1.step)}
+                                disabled={isLeadLocked}
+                                title={`Clear ${input1.label}`}
+                                style={{ border: "none", background: "transparent", color: "var(--text-secondary)", cursor: isLeadLocked ? "not-allowed" : "pointer", padding: "0 2px", fontSize: "14px", lineHeight: 1 }}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
                           <input
                             type="date"
-                            value={toISTDateString(lead.followUpDate1)}
-                            onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate1', e.target.value)}
+                            value={input1.isoDate}
+                            onChange={(e) => {
+                              if (input1.exists) {
+                                handleFollowUpStepChange(lead, input1.step, e.target.value);
+                              } else {
+                                handleAddNewFollowUp(lead, input1.step, e.target.value);
+                              }
+                            }}
                             disabled={isLeadLocked}
                             className="status-select"
                             style={{ border: "1px solid var(--border)", background: "#fff", padding: "6px 8px", fontSize: "12px", width: "100%", borderRadius: 6 }}
@@ -2503,11 +2850,11 @@ export default function DashboardPage() {
                         </div>
 
                         <div className="lead-mobile-control-item">
-                          <span className="lead-mobile-meta-label">Follow-Up 2</span>
+                          <span className="lead-mobile-meta-label">{input2.label}</span>
                           <input
                             type="date"
-                            value={toISTDateString(lead.followUpDate2)}
-                            onChange={(e) => handleFollowUpUpdate(lead, 'followUpDate2', e.target.value)}
+                            value={input2.isoDate}
+                            onChange={(e) => handleAddNewFollowUp(lead, input2.step, e.target.value)}
                             disabled={isLeadLocked}
                             className="status-select"
                             style={{ border: "1px solid var(--border)", background: "#fff", padding: "6px 8px", fontSize: "12px", width: "100%", borderRadius: 6 }}

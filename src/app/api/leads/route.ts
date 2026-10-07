@@ -210,13 +210,18 @@ export async function GET(request: NextRequest) {
     if (followUpStartDate || followUpEndDate) {
       const f1Cond: any = {};
       const f2Cond: any = {};
+      const fRelCond: any = {};
       if (followUpStartDate) {
-        f1Cond.gte = new Date(`${followUpStartDate}T00:00:00+05:30`);
-        f2Cond.gte = new Date(`${followUpStartDate}T00:00:00+05:30`);
+        const startD = new Date(`${followUpStartDate}T00:00:00+05:30`);
+        f1Cond.gte = startD;
+        f2Cond.gte = startD;
+        fRelCond.gte = startD;
       }
       if (followUpEndDate) {
-        f1Cond.lte = new Date(`${followUpEndDate}T23:59:59.999+05:30`);
-        f2Cond.lte = new Date(`${followUpEndDate}T23:59:59.999+05:30`);
+        const endD = new Date(`${followUpEndDate}T23:59:59.999+05:30`);
+        f1Cond.lte = endD;
+        f2Cond.lte = endD;
+        fRelCond.lte = endD;
       }
       statsWhere.AND = [
         ...(statsWhere.AND || []),
@@ -224,6 +229,7 @@ export async function GET(request: NextRequest) {
           OR: [
             { followUpDate1: f1Cond },
             { followUpDate2: f2Cond },
+            { followUps: { some: { date: fRelCond } } },
           ]
         }
       ];
@@ -234,6 +240,8 @@ export async function GET(request: NextRequest) {
           OR: [
             { followUpDate1: { not: null } },
             { followUpDate2: { not: null } },
+            { followUps: { some: {} } },
+            { followUpCount: { gt: 0 } },
           ]
         }
       ];
@@ -359,6 +367,7 @@ export async function GET(request: NextRequest) {
       OR: [
         { followUpDate1: { lte: todayEndOfDay, not: null } },
         { followUpDate2: { lte: todayEndOfDay, not: null } },
+        { followUps: { some: { date: { lte: todayEndOfDay } } } },
       ],
     };
 
@@ -380,6 +389,8 @@ export async function GET(request: NextRequest) {
           } else if (st === 'lost' || st === 'closed_unsuccessful') {
             dbStatuses.add('lost');
             dbStatuses.add('closed_unsuccessful');
+          } else if (st === 'callback') {
+            dbStatuses.add('callback');
           } else {
             dbStatuses.add(st);
           }
@@ -416,7 +427,7 @@ export async function GET(request: NextRequest) {
     }
 
     const skipStats = searchParams.get('skipStats') === 'true' || searchParams.get('skipStats') === '1';
-    const skipActivities = searchParams.get('skipActivities') === 'true' || searchParams.get('skipActivities') === '1' || isCalendar;
+    const skipActivities = searchParams.get('skipActivities') === 'true' || searchParams.get('skipActivities') === '1';
 
     const leadSelect = isCalendar ? {
       id: true,
@@ -427,8 +438,17 @@ export async function GET(request: NextRequest) {
       branch: true,
       followUpDate1: true,
       followUpDate2: true,
+      followUpCount: true,
+      followUps: {
+        orderBy: { step: 'asc' as const },
+        select: { id: true, step: true, date: true, createdAt: true, updatedAt: true },
+      },
       remark: true,
       status: true,
+      assignedConsultant: true,
+      handledBy: true,
+      testDrive: true,
+      isInvalidPhone: true,
       createdAt: true,
       updatedAt: true,
     } : {
@@ -440,6 +460,11 @@ export async function GET(request: NextRequest) {
       branch: true,
       followUpDate1: true,
       followUpDate2: true,
+      followUpCount: true,
+      followUps: {
+        orderBy: { step: 'asc' as const },
+        select: { id: true, step: true, date: true, createdAt: true, updatedAt: true },
+      },
       remark: true,
       status: true,
       testDrive: true,
@@ -464,6 +489,7 @@ export async function GET(request: NextRequest) {
     let pendingLeads = 0;
     let liveLeads = 0;
     let lostLeads = 0;
+    let callbackLeads = 0;
     let maxUpdatedAt: string | null = null;
     let categoryStats = {
       valid: 0,
@@ -481,8 +507,7 @@ export async function GET(request: NextRequest) {
           prisma.lead.findMany({
             where,
             orderBy,
-            skip,
-            take: limit,
+            ...(isExport ? {} : { skip, take: limit }),
             select: leadSelect,
           }),
           prisma.lead.count({ where }),
@@ -493,8 +518,7 @@ export async function GET(request: NextRequest) {
         leads = await prisma.lead.findMany({
           where,
           orderBy,
-          skip,
-          take: limit,
+          ...(isExport ? {} : { skip, take: limit }),
           select: leadSelect,
         });
       }
@@ -513,8 +537,7 @@ export async function GET(request: NextRequest) {
         prisma.lead.findMany({
           where,
           orderBy,
-          skip,
-          take: limit,
+          ...(isExport ? {} : { skip, take: limit }),
           select: leadSelect,
         }),
         prisma.lead.count({ where }),
@@ -605,6 +628,8 @@ export async function GET(request: NextRequest) {
           liveLeads += count;
         } else if (['lost', 'closed_unsuccessful'].includes(group.status)) {
           lostLeads += count;
+        } else if (group.status === 'callback') {
+          callbackLeads += count;
         }
       });
     }
@@ -678,6 +703,7 @@ export async function GET(request: NextRequest) {
         pending: pendingLeads,
         live: liveLeads,
         lost: lostLeads,
+        callback: callbackLeads,
         open: pendingLeads,
         closedSuccessful: liveLeads,
         closedUnsuccessful: lostLeads,

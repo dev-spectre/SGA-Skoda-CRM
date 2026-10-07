@@ -457,9 +457,9 @@ body::before {
 .btn-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: #ffffff;
-  box-shadow: 0 4px 15px rgba(16, 185, 129,0.3);
+  box-shadow: 0 4px 15px rgba(0, 114, 188, 0.3);
 }
-.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16, 185, 129,0.4); }
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0, 114, 188, 0.4); }
 .btn-primary:active { transform: translateY(0); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .btn-ghost {
@@ -570,6 +570,7 @@ tbody tr:hover { background: var(--bg-card-hover); }
 .status-badge.pending { background: rgba(245, 158, 11, 0.15); color: #d97706; border: 1px solid rgba(245, 158, 11, 0.3); }
 .status-badge.live, .status-badge.closed_successful { background: rgba(16, 185, 129,0.15); color: var(--status-success); border: 1px solid rgba(16, 185, 129,0.3); }
 .status-badge.lost, .status-badge.closed_unsuccessful { background: rgba(255,82,82,0.15); color: var(--status-fail); border: 1px solid rgba(255,82,82,0.3); }
+.status-badge.callback { background: rgba(168, 85, 247, 0.15); color: #9333ea; border: 1px solid rgba(168, 85, 247, 0.3); }
 .status-badge::before {
   content: '';
   width: 6px; height: 6px;
@@ -640,6 +641,12 @@ select:focus, select:hover {
   background-color: #fef2f2 !important;
   color: #b91c1c !important;
   border-color: #fecaca !important;
+}
+
+.status-select.status-callback {
+  background-color: #faf5ff !important;
+  color: #7e22ce !important;
+  border-color: #e9d5ff !important;
 }
 
 /* Test Drive Statuses */
@@ -1617,7 +1624,7 @@ select:focus, select:hover {
   line-height: 1.7;
 }
 .landing-cta { margin-top: 8px; }
-.btn-primary {
+.landing-cta .btn-primary {
   display: inline-block;
   padding: 14px 32px;
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -1629,7 +1636,7 @@ select:focus, select:hover {
   box-shadow: 0 6px 24px rgba(16, 185, 129, 0.35);
   transition: transform 0.15s, box-shadow 0.15s;
 }
-.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(16, 185, 129, 0.45); }
+.landing-cta .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(16, 185, 129, 0.45); }
 
 .landing-features,
 .landing-oauth,
@@ -1707,6 +1714,6 @@ select:focus, select:hover {
   .landing-brand h1 { font-size: 18px; }
   .landing-nav a { padding: 8px 16px; font-size: 12px; }
   .landing-page main { padding: 8px 20px 40px; }
-  .btn-primary { padding: 12px 24px; font-size: 14px; }
+  .landing-cta .btn-primary { padding: 12px 24px; font-size: 14px; }
   .landing-footer { padding: 24px 20px; }
 }

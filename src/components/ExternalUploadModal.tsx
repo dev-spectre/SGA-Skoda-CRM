@@ -318,7 +318,7 @@ export function ExternalUploadModal({ isOpen, onClose, onSuccess }: ExternalUplo
 
     try {
       const selectedPlatform = defaultPlatform === "custom" ? customPlatform.trim() : defaultPlatform;
-      let payload: any = { mapping, defaultPlatform: selectedPlatform || "Unknown" };
+      const payload: any = { mapping, defaultPlatform: selectedPlatform || "Unknown" };
 
       if (sourceType === "file") {
         payload.rows = allParsedRows;

@@ -81,7 +81,7 @@ export function parseBranches(branchStr: string | null | undefined): string[] {
   return Array.from(new Set(parsed));
 }
 
-export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'live' | 'lost' {
+export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'live' | 'lost' | 'callback' {
   if (!rawStatusStr) return 'not_contacted';
 
   const norm = String(rawStatusStr).toLowerCase().replace(/[\s_]+/g, '').trim();
@@ -94,6 +94,14 @@ export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_
     norm === 'new'
   ) {
     return 'not_contacted';
+  }
+
+  // callback / CALL BACK
+  if (
+    norm.includes('callback') ||
+    norm === 'call_back'
+  ) {
+    return 'callback';
   }
 
   // 2. completed / COMPLETED -> completed ('live' in DB)
