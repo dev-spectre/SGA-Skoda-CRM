@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { parsePhoneNumber } from '@/lib/utils';
-import { getCategoryFilterConditions } from '@/lib/classification';
 
 export async function GET(request: NextRequest) {
   try {
@@ -152,23 +151,62 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Apply category filter to where clause
-    const { outsideLocationCondition, validLocationCondition } = await getCategoryFilterConditions();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const statsWhere: any = { ...where };
+
+    const validPhoneCondition: any = {
+      isInvalidPhone: false,
+    };
+    const invalidPhoneCondition: any = {
+      isInvalidPhone: true,
+    };
+    const inStateCondition: any = {
+      isOutOfState: false,
+    };
+    const outOfStateCondition: any = {
+      isOutOfState: true,
+    };
+
+    const now = new Date();
+    const kolkataFormatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const todayDateStr = kolkataFormatter.format(now);
+    const todayEndOfDay = new Date(`${todayDateStr}T23:59:59.999+05:30`);
+    const priorityFollowUpCondition: any = {
+      OR: [
+        { followUpDate1: { lte: todayEndOfDay, not: null } },
+        { followUpDate2: { lte: todayEndOfDay, not: null } },
+        { followUps: { some: { date: { lte: todayEndOfDay } } } },
+      ],
+    };
 
     if (category === 'valid') {
       where.AND = [
         ...(where.AND || []),
-        validLocationCondition,
-      ];
-    } else if (category === 'outside' || category === 'unassigned') {
-      where.AND = [
-        ...(where.AND || []),
-        outsideLocationCondition,
+        validPhoneCondition,
+        inStateCondition,
       ];
     } else if (category === 'invalid') {
       where.AND = [
         ...(where.AND || []),
-        { isInvalidPhone: true },
+        invalidPhoneCondition,
+      ];
+    } else if (category === 'outside' || category === 'unassigned') {
+      where.AND = [
+        ...(where.AND || []),
+        validPhoneCondition,
+        outOfStateCondition,
+      ];
+    } else if (category === 'priority') {
+      where.AND = [
+        ...(where.AND || []),
+        validPhoneCondition,
+        inStateCondition,
+        priorityFollowUpCondition,
       ];
     }
 
@@ -199,7 +237,15 @@ export async function GET(request: NextRequest) {
         }
 
         // Fetch changed leads and fresh stats in parallel
-        const [changedLeads, statusCounts, validCount, invalidCount, outsideCount, allCount] = await Promise.all([
+        const [
+          changedLeads,
+          statusCounts,
+          validCount,
+          invalidCount,
+          outsideCount,
+          allCount,
+          priorityCount,
+        ] = await Promise.all([
           prisma.lead.findMany({
             where: {
               ...where,
@@ -231,6 +277,7 @@ export async function GET(request: NextRequest) {
               },
               uploadedAt: true,
               isInvalidPhone: true,
+              isOutOfState: true,
               isBranchManual: true,
               createdAt: true,
               updatedAt: true,
@@ -239,16 +286,53 @@ export async function GET(request: NextRequest) {
             take: 50,
           }),
           prisma.lead.groupBy({
-            where,
+            where: status || (category && category !== 'all') ? where : statsWhere,
             by: ['status'],
             _count: {
               status: true,
             },
           }),
-          prisma.lead.count({ where: validLocationCondition }),
-          prisma.lead.count({ where: { isInvalidPhone: true } }),
-          prisma.lead.count({ where: outsideLocationCondition }),
-          prisma.lead.count(),
+          prisma.lead.count({
+            where: {
+              ...statsWhere,
+              AND: [
+                ...(statsWhere.AND || []),
+                validPhoneCondition,
+                inStateCondition,
+              ],
+            },
+          }),
+          prisma.lead.count({
+            where: {
+              ...statsWhere,
+              AND: [
+                ...(statsWhere.AND || []),
+                invalidPhoneCondition,
+              ],
+            },
+          }),
+          prisma.lead.count({
+            where: {
+              ...statsWhere,
+              AND: [
+                ...(statsWhere.AND || []),
+                validPhoneCondition,
+                outOfStateCondition,
+              ],
+            },
+          }),
+          prisma.lead.count({ where: statsWhere }),
+          prisma.lead.count({
+            where: {
+              ...statsWhere,
+              AND: [
+                ...(statsWhere.AND || []),
+                validPhoneCondition,
+                inStateCondition,
+                priorityFollowUpCondition,
+              ],
+            },
+          }),
         ]);
 
         if (changedLeads.length === 0) {
@@ -298,7 +382,8 @@ export async function GET(request: NextRequest) {
             invalid: invalidCount,
             outside: outsideCount,
             all: allCount,
-            priority: 0,
+            priority: priorityCount,
+            unassigned: outsideCount,
           },
         };
 
@@ -314,7 +399,7 @@ export async function GET(request: NextRequest) {
 
     // Default response if no 'since' provided
     return NextResponse.json({
-      hasChanges: true,
+      hasChanges: false,
       changedLeads: [],
       count,
       lastUpdated: lastUpdated ? lastUpdated.toISOString() : null,

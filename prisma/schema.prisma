@@ -32,6 +32,7 @@ model Lead {
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   isInvalidPhone     Boolean        @default(false)
+  isOutOfState       Boolean        @default(false)
   isBranchManual     Boolean        @default(false)
   hiddenBy           HiddenLead[]
   uploadedBy         User?          @relation("UserUploadedLeads", fields: [uploadedById], references: [id])
@@ -44,6 +45,7 @@ model Lead {
   @@index([branch])
   @@index([fingerprint])
   @@index([isInvalidPhone])
+  @@index([isOutOfState])
   @@index([isBranchManual])
 }
 

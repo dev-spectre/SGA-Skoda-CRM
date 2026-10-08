@@ -1,18 +1,3 @@
-export function isInvalidPhoneNumber(phone: string | null | undefined): boolean {
-  if (!phone) return true;
-  const parsed = parsePhoneNumber(phone);
-  if (!parsed || parsed === 'Test Lead Phone') return true;
-  const parsedDigits = parsed.replace(/\D/g, '');
-  if (parsedDigits.length !== 10) return true;
-  // All identical repeating digits (e.g. 0000000000, 1111111111)
-  if (/^(\d)\1{9}$/.test(parsedDigits)) return true;
-  // Valid Indian mobile numbers start with 6, 7, 8, or 9
-  if (!/^[6-9]/.test(parsedDigits)) return true;
-  const rawDigits = String(phone).replace(/\D/g, '');
-  if (rawDigits.length > 10 && parsed.length > 10) return true;
-  return false;
-}
-
 export function parsePhoneNumber(rawPhone: string | null | undefined): string {
   if (!rawPhone) return '';
   
@@ -63,6 +48,29 @@ export function parsePhoneNumber(rawPhone: string | null | undefined): string {
   return digitsOnly || cleaned;
 }
 
+export function isInvalidPhoneNumber(phone: string | null | undefined): boolean {
+  if (!phone) return true;
+  const parsed = parsePhoneNumber(phone);
+  if (!parsed || parsed === 'Test Lead Phone') return true;
+  
+  // Extract digits from the parsed number
+  const parsedDigits = parsed.replace(/\D/g, '');
+  
+  // Extra or missing digits: Indian mobile numbers must be strictly 10 digits
+  if (parsedDigits.length !== 10) return true;
+  
+  // If the parsed string retained an international '+' prefix with >10 digits or non-Indian prefix
+  if (parsed.startsWith('+') && parsed.length > 10) return true;
+  
+  // Valid Indian mobile numbers start with 6, 7, 8, or 9
+  if (!/^[6-9]\d{9}$/.test(parsedDigits)) return true;
+  
+  // Fake / dummy numbers with all identical digits (e.g. 0000000000, 9999999999, 1111111111)
+  if (/^(\d)\1{9}$/.test(parsedDigits)) return true;
+  
+  return false;
+}
+
 export function sanitizeField(rawVal: string | null | undefined): string {
   if (!rawVal) return '';
   let str = String(rawVal).trim();
@@ -75,21 +83,23 @@ export function sanitizeField(rawVal: string | null | undefined): string {
 export function parseBranches(branchStr: string | null | undefined): string[] {
   if (!branchStr) return [];
   const parsed = String(branchStr).split(',').map(b => {
-    const clean = b.replace(/[_-]/g, ' ').trim().replace(/\s+/g, ' ').toLowerCase();
+    const clean = b.replace(/[_-]/g, ' ').trim().replace(/\s+/g, ' ');
     if (!clean) return '';
     return clean.split(' ').map(w => {
-      if (w.toLowerCase() === 'mtp') return 'MTP';
-      return w.charAt(0).toUpperCase() + w.slice(1);
+      const lower = w.toLowerCase();
+      if (lower === 'sga') return 'SGA';
+      if (lower === 'mtp') return 'MTP';
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
     }).join(' ');
   }).filter(Boolean);
   return Array.from(new Set(parsed));
 }
 
-export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'live' | 'lost' {
-  if (!rawStatusStr) return 'not_contacted';
+export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_contacted' | 'pending' | 'callback' | 'live' | 'lost' | null {
+  if (!rawStatusStr) return null;
 
   const norm = String(rawStatusStr).toLowerCase().replace(/[\s_]+/g, '').trim();
-  if (!norm) return 'not_contacted';
+  if (!norm) return null;
 
   // 1. created / CREATED / not contacted -> not contacted ('not_contacted' in DB)
   if (
@@ -100,15 +110,16 @@ export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_
     return 'not_contacted';
   }
 
-  // callback / CALL BACK -> maps to Contacted (pending)
+  // 2. callback / CALLBACK / cb -> callback ('callback' in DB)
   if (
     norm.includes('callback') ||
-    norm === 'call_back'
+    norm === 'cb' ||
+    norm.includes('callagain')
   ) {
-    return 'pending';
+    return 'callback';
   }
 
-  // 2. completed / COMPLETED -> completed ('live' in DB)
+  // 3. completed / COMPLETED -> completed ('live' in DB)
   if (
     norm === 'completed' ||
     norm === 'won' ||
@@ -120,7 +131,7 @@ export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_
     return 'live';
   }
 
-  // 3. lost lead / LOST LEAD / lost -> lost ('lost' in DB)
+  // 4. lost lead / LOST LEAD / lost -> lost ('lost' in DB)
   if (
     norm.includes('lost') ||
     norm === 'dead' ||
@@ -132,7 +143,7 @@ export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_
     return 'lost';
   }
 
-  // 4. live lead / LIVE LEAD / contacted -> contacted ('pending' in DB)
+  // 5. live lead / LIVE LEAD / contacted -> contacted ('pending' in DB)
   if (
     norm.includes('live') ||
     norm.includes('contacted') ||
@@ -144,6 +155,17 @@ export function parseSheetStatus(rawStatusStr: string | null | undefined): 'not_
     return 'pending';
   }
 
-  return 'not_contacted';
+  return null;
+}
+
+export function formatStatusLabel(st: string | null | undefined): string {
+  if (!st) return 'Not Contacted';
+  const lower = st.toLowerCase().trim();
+  if (lower === 'not_contacted' || lower === 'created') return 'Not Contacted';
+  if (lower === 'pending') return 'Contacted';
+  if (lower === 'callback') return 'Callback';
+  if (lower === 'live' || lower === 'closed_successful') return 'Completed';
+  if (lower === 'lost' || lower === 'closed_unsuccessful') return 'Lost';
+  return st.replace(/_/g, ' ');
 }
 

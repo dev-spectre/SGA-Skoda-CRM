@@ -38,6 +38,9 @@ interface Lead {
   uploadedById?: number | null;
   uploadedBy?: { id?: number; username: string } | null;
   uploadedAt?: string | null;
+  isBranchManual?: boolean;
+  isOutOfState?: boolean;
+  isInvalidPhone?: boolean;
   updatedAt?: string;
 }
 

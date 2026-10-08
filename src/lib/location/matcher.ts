@@ -528,6 +528,16 @@ export function resolveLocation(
       // Rule B: First letter must be compatible (same letter or transliteration C/K, T/Th)
       if (!areFirstLettersCompatible(word, cand.key)) continue;
 
+      // Phonetic equivalence check: handles transliteration variances (th/t, double letters, etc.)
+      if (word.length >= 5 && cand.key.length >= 5 && phoneticWord === cand.phoneticKey) {
+        const pScore = 0.94;
+        if (pScore > bestScore) {
+          bestScore = pScore;
+          bestCandidate = cand.node;
+        }
+        continue;
+      }
+
       // Rule C: Length difference must not exceed 2
       const lenDiff = Math.abs(word.length - cand.key.length);
       if (lenDiff > 2) continue;
@@ -541,17 +551,6 @@ export function resolveLocation(
         if (sim >= 0.80 && sim > bestScore) {
           bestScore = sim;
           bestCandidate = cand.node;
-        }
-      }
-
-      // Rule E: Constrained phonetic matching (only for words >= 6 chars with dist <= 2)
-      if (word.length >= 6 && dist <= 2) {
-        if (phoneticWord === cand.phoneticKey) {
-          const pScore = 0.90;
-          if (pScore > bestScore) {
-            bestScore = pScore;
-            bestCandidate = cand.node;
-          }
         }
       }
     }

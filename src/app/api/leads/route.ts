@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/auth';
 import { resolveLeadHandler, getCachedStaffUsers } from '@/lib/activity';
-import { getCategoryFilterConditions } from '@/lib/classification';
 
 export async function GET(request: NextRequest) {
   try {
@@ -341,15 +340,20 @@ export async function GET(request: NextRequest) {
     (rawConsultants as { branch: string | null }[]).forEach((c) => addBranch(c.branch));
     (rawUsers as { assignedBranch: string | null }[]).forEach((u) => addBranch(u.assignedBranch));
 
-    // Outside and Valid Tamil Nadu location conditions
-    const { outsideLocationCondition, validLocationCondition } = await getCategoryFilterConditions();
-
     const validPhoneCondition: any = {
       isInvalidPhone: false,
     };
 
     const invalidPhoneCondition: any = {
       isInvalidPhone: true,
+    };
+
+    const inStateCondition: any = {
+      isOutOfState: false,
+    };
+
+    const outOfStateCondition: any = {
+      isOutOfState: true,
     };
 
     const now = new Date();
@@ -402,7 +406,8 @@ export async function GET(request: NextRequest) {
     if (category === 'valid') {
       where.AND = [
         ...(where.AND || []),
-        validLocationCondition,
+        validPhoneCondition,
+        inStateCondition,
       ];
     } else if (category === 'invalid') {
       where.AND = [
@@ -412,12 +417,14 @@ export async function GET(request: NextRequest) {
     } else if (category === 'outside' || category === 'unassigned') {
       where.AND = [
         ...(where.AND || []),
-        outsideLocationCondition,
+        validPhoneCondition,
+        outOfStateCondition,
       ];
     } else if (category === 'priority') {
       where.AND = [
         ...(where.AND || []),
-        validLocationCondition,
+        validPhoneCondition,
+        inStateCondition,
         priorityFollowUpCondition,
       ];
     }
@@ -444,6 +451,7 @@ export async function GET(request: NextRequest) {
       assignedConsultant: true,
       testDrive: true,
       isInvalidPhone: true,
+      isOutOfState: true,
       createdAt: true,
       updatedAt: true,
     } : {
@@ -472,6 +480,7 @@ export async function GET(request: NextRequest) {
       },
       uploadedAt: true,
       isInvalidPhone: true,
+      isOutOfState: true,
       isBranchManual: true,
       createdAt: true,
       updatedAt: true,
@@ -492,6 +501,7 @@ export async function GET(request: NextRequest) {
       outside: 0,
       all: 0,
       priority: 0,
+      unassigned: 0,
     };
 
     const includeTotal = searchParams.get('includeTotal') === 'true' || Boolean(followUpDate || followUpStartDate) || !skipStats;
@@ -549,17 +559,18 @@ export async function GET(request: NextRequest) {
             updatedAt: true,
           },
         }),
-        // 1. Valid: leads with valid phone and inside Tamil Nadu
+        // 1. Valid: Tamil Nadu leads with valid phone number
         prisma.lead.count({
           where: {
             ...statsWhere,
             AND: [
               ...(statsWhere.AND || []),
-              validLocationCondition,
+              validPhoneCondition,
+              inStateCondition,
             ],
           },
         }),
-        // 2. Invalid: leads with invalid phone
+        // 2. Invalid: Leads with invalid phone number
         prisma.lead.count({
           where: {
             ...statsWhere,
@@ -569,13 +580,14 @@ export async function GET(request: NextRequest) {
             ],
           },
         }),
-        // 3. Outside: leads with valid phone and outside Tamil Nadu
+        // 3. Outside: Leads outside Tamil Nadu with valid phone number
         prisma.lead.count({
           where: {
             ...statsWhere,
             AND: [
               ...(statsWhere.AND || []),
-              outsideLocationCondition,
+              validPhoneCondition,
+              outOfStateCondition,
             ],
           },
         }),
@@ -589,7 +601,8 @@ export async function GET(request: NextRequest) {
             ...statsWhere,
             AND: [
               ...(statsWhere.AND || []),
-              validLocationCondition,
+              validPhoneCondition,
+              inStateCondition,
               priorityFollowUpCondition,
             ],
           },
@@ -604,6 +617,7 @@ export async function GET(request: NextRequest) {
         outside: outsideCount,
         all: allCount,
         priority: priorityCount,
+        unassigned: outsideCount,
       };
       if (maxAggregate?._max?.updatedAt) {
         maxUpdatedAt = maxAggregate._max.updatedAt.toISOString();

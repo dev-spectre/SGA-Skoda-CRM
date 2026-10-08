@@ -88,18 +88,13 @@ export async function getActiveBranchesCached(): Promise<BranchCandidate[]> {
 // ==========================================
 // 2. In-Memory Geocoded Locations Cache
 // ==========================================
+// 2. In-Memory Geocoded Locations Cache
+// ==========================================
 
-export interface CachedLocationData {
-  canonicalName: string;
-  district: string;
-  state: string;
-  latitude: number;
-  longitude: number;
-  source: string;
-  isTamilNadu: boolean;
-}
+export type { CachedLocationData } from './cache-store';
+export { getCachedLocationFromMemory, getAllCachedLocationsFromMemory } from './cache-store';
+import { CachedLocationData, setCachedLocationMemory } from './cache-store';
 
-const locationMemoryMap = new Map<string, CachedLocationData>();
 let isLocationCacheLoaded = false;
 let locationCacheLoadPromise: Promise<void> | null = null;
 
@@ -136,7 +131,7 @@ export async function ensureLocationCacheLoaded(): Promise<void> {
               row.longitude >= 76.23 &&
               row.longitude <= 80.35);
 
-        locationMemoryMap.set(key, {
+        setCachedLocationMemory(key, {
           canonicalName: row.canonicalName,
           district: row.district,
           state: row.state,
@@ -159,21 +154,6 @@ export async function ensureLocationCacheLoaded(): Promise<void> {
 }
 
 /**
- * Instant in-memory lookup for a normalized search key (< 0.001ms).
- */
-export function getCachedLocationFromMemory(key: string): CachedLocationData | null {
-  if (!key) return null;
-  return locationMemoryMap.get(key.toLowerCase().trim()) ?? null;
-}
-
-/**
- * Returns all cached entries currently in memory for fuzzy matching.
- */
-export function getAllCachedLocationsFromMemory(): Map<string, CachedLocationData> {
-  return locationMemoryMap;
-}
-
-/**
  * Saves a resolved location to in-memory cache and asynchronously persists to DB.
  */
 export async function setCachedLocation(
@@ -182,7 +162,7 @@ export async function setCachedLocation(
 ): Promise<void> {
   if (!key) return;
   const cleanKey = key.toLowerCase().trim();
-  locationMemoryMap.set(cleanKey, data);
+  setCachedLocationMemory(cleanKey, data);
 
   // Persist to database asynchronously without blocking caller
   prisma.locationCache

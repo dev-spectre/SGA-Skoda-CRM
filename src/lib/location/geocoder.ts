@@ -1,6 +1,7 @@
 import { prisma } from '../prisma';
 import { resolveLocation } from './matcher';
 import { normalizeKey } from './tn-locations';
+import { isLocationOutsideTamilNadu } from './out-of-state';
 import {
   ensureLocationCacheLoaded,
   getCachedLocationFromMemory,
@@ -83,34 +84,8 @@ export class RateLimiter {
 // Global rate limiter singleton (1000ms delay between external geocoder requests)
 export const globalRateLimiter = new RateLimiter(1000);
 
-/**
- * Approximate Geographic Bounding Box for Tamil Nadu (+ Puducherry enclaves).
- * South: ~8.08° N (Kanyakumari)
- * North: ~13.55° N (Tiruvallur border / Pulicat Lake)
- * West:  ~76.23° E (Nilgiris / Anaimalai western borders)
- * East:  ~80.35° E (Bay of Bengal coast / Chennai & Puducherry)
- */
-export const TAMIL_NADU_BOUNDS = {
-  minLat: 8.08,
-  maxLat: 13.55,
-  minLon: 76.23,
-  maxLon: 80.35,
-} as const;
-
-/**
- * Checks whether given latitude and longitude coordinates fall within
- * the Tamil Nadu bounding rectangle.
- */
-export function isWithinTamilNaduBounds(lat: number, lon: number): boolean {
-  if (typeof lat !== 'number' || typeof lon !== 'number') return false;
-  if (isNaN(lat) || isNaN(lon)) return false;
-  return (
-    lat >= TAMIL_NADU_BOUNDS.minLat &&
-    lat <= TAMIL_NADU_BOUNDS.maxLat &&
-    lon >= TAMIL_NADU_BOUNDS.minLon &&
-    lon <= TAMIL_NADU_BOUNDS.maxLon
-  );
-}
+export { TAMIL_NADU_BOUNDS, isWithinTamilNaduBounds, isTamilNaduState } from './bounds';
+import { isWithinTamilNaduBounds, isTamilNaduState } from './bounds';
 
 interface ExternalGeocodeResponse {
   canonicalName: string;
@@ -126,49 +101,27 @@ interface ExternalGeocodeResponse {
  * and bounding box restricted strictly to Tamil Nadu.
  */
 export async function queryNominatim(query: string): Promise<ExternalGeocodeResponse | null> {
-  const fetchNominatim = async (q: string, withViewbox = true) => {
-    const viewboxParam = withViewbox
-      ? `&viewbox=${TAMIL_NADU_BOUNDS.minLon},${TAMIL_NADU_BOUNDS.maxLat},${TAMIL_NADU_BOUNDS.maxLon},${TAMIL_NADU_BOUNDS.minLat}`
-      : '';
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
-      q
-    )}&format=json&addressdetails=1&countrycodes=in${viewboxParam}&limit=1`;
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+    query
+  )}&format=json&addressdetails=1&countrycodes=in&limit=1`;
 
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'SGA-Skoda-CRM/1.0 (dealership-lead-routing)',
-        Accept: 'application/json',
-      },
-    });
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'SGA-Tata-CRM/1.0 (dealership-lead-routing)',
+      Accept: 'application/json',
+    },
+  });
 
-    if (!res.ok) {
-      throw new Error(`Nominatim error: HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
-    return data[0];
-  };
-
-  // 1. Try first with Tamil Nadu bounding box viewbox
-  let first = await fetchNominatim(query, true);
-
-  // 2. If not matched, try appending ', Tamil Nadu' with bounding box
-  if (!first && !query.toLowerCase().includes('tamil nadu')) {
-    first = await fetchNominatim(`${query}, Tamil Nadu`, true);
+  if (!res.ok) {
+    throw new Error(`Nominatim error: HTTP ${res.status}`);
   }
 
-  // 3. If still not matched, check general Indian query without bounding box to catch outside-state cities
-  if (!first) {
-    first = await fetchNominatim(query, false);
-  }
-
-  if (!first) {
+  const data = await res.json();
+  if (!Array.isArray(data) || data.length === 0) {
     return null;
   }
 
+  const first = data[0];
   const address = first.address || {};
   const state = address.state || address.region || '';
   const district = address.state_district || address.county || address.city || '';
@@ -235,19 +188,6 @@ export async function queryGoogleGeocode(
   };
 }
 
-/**
- * Helper to test if a state name belongs to Tamil Nadu or adjacent Puducherry
- */
-export function isTamilNaduState(stateName: string): boolean {
-  if (!stateName) return false;
-  const s = stateName.toLowerCase();
-  return (
-    s.includes('tamil nadu') ||
-    s.includes('tamilnadu') ||
-    s.includes('puducherry') ||
-    s.includes('pondicherry')
-  );
-}
 
 /**
  * Tiered Location Resolution Pipeline:
@@ -325,8 +265,8 @@ export async function resolveLocationTiered(
     };
   }
 
-  // If query is an out-of-state pincode, return early as outside TN
-  if (exactDictResult.isOutOfState) {
+  // If query is an out-of-state pincode or confirmed out-of-state location, return early as outside TN
+  if (exactDictResult.isOutOfState || isLocationOutsideTamilNadu(query)) {
     return {
       matched: true,
       query,
@@ -348,7 +288,33 @@ export async function resolveLocationTiered(
   if (!options?.skipCache && searchKey) {
     try {
       await ensureLocationCacheLoaded();
-      const cached = getCachedLocationFromMemory(searchKey);
+      let cached = getCachedLocationFromMemory(searchKey);
+
+      if (!cached) {
+        const row = await prisma.locationCache.findUnique({
+          where: { searchTerm: searchKey },
+        });
+        if (row) {
+          const s = (row.state || '').toLowerCase();
+          const isTN = s
+            ? (s.includes('tamil nadu') || s.includes('tamilnadu') || s.includes('puducherry') || s.includes('pondicherry'))
+            : (row.latitude >= 8.08 &&
+                row.latitude <= 13.55 &&
+                row.longitude >= 76.23 &&
+                row.longitude <= 80.35);
+
+          cached = {
+            canonicalName: row.canonicalName,
+            district: row.district,
+            state: row.state,
+            latitude: row.latitude,
+            longitude: row.longitude,
+            source: row.source || 'cache',
+            isTamilNadu: isTN,
+          };
+          setCachedLocation(searchKey, cached);
+        }
+      }
 
       if (cached) {
         return {
@@ -386,52 +352,79 @@ export async function resolveLocationTiered(
           };
         }
       }
-
-      // Fallback: Query prisma.locationCache directly if memory cache missed
-      const dbCached = await prisma.locationCache.findFirst({
-        where: {
-          OR: [
-            { searchTerm: searchKey },
-            { canonicalName: { equals: query, mode: 'insensitive' } },
-          ],
-        },
-      });
-
-      if (dbCached) {
-        const isTN = dbCached.state
-          ? isTamilNaduState(dbCached.state)
-          : isWithinTamilNaduBounds(dbCached.latitude, dbCached.longitude);
-
-        setCachedLocation(searchKey, {
-          canonicalName: dbCached.canonicalName,
-          district: dbCached.district,
-          state: dbCached.state,
-          latitude: dbCached.latitude,
-          longitude: dbCached.longitude,
-          source: (dbCached.source as any) || 'cache',
-          isTamilNadu: isTN,
-        }).catch(() => {});
-
-        return {
-          matched: true,
-          query,
-          canonicalName: dbCached.canonicalName,
-          district: dbCached.district,
-          state: dbCached.state,
-          latitude: dbCached.latitude,
-          longitude: dbCached.longitude,
-          source: 'cache',
-          confidence: 0.95,
-          isTamilNadu: isTN,
-        };
-      }
     } catch (err) {
       console.warn('In-memory LocationCache lookup warning:', err);
     }
   }
 
-  // If external network lookup skipped, exit early
-  if (options?.skipExternal) {
+  // ----------------------------------------------------
+  // Tier 2.5: Smart Misspelling & Phonetic Fallback for Tamil Nadu Locations (< 0.1ms)
+  // Evaluates local dictionary with typo & transliteration tolerance BEFORE making external network calls
+  // ----------------------------------------------------
+  const fuzzyResult = resolveLocation(query);
+  if (fuzzyResult.isOutOfState) {
+    return {
+      matched: true,
+      query,
+      canonicalName: query,
+      district: '',
+      state: 'Outside Tamil Nadu',
+      latitude: 0,
+      longitude: 0,
+      source: 'none',
+      confidence: 1.0,
+      isTamilNadu: false,
+    };
+  }
+
+  if (fuzzyResult.matched) {
+    if (searchKey) {
+      setCachedLocation(searchKey, {
+        canonicalName: fuzzyResult.canonicalName,
+        district: fuzzyResult.district,
+        state: 'Tamil Nadu',
+        latitude: fuzzyResult.latitude,
+        longitude: fuzzyResult.longitude,
+        source: 'dictionary',
+        isTamilNadu: true,
+      }).catch((cacheErr) => {
+        console.warn('LocationCache save warning:', cacheErr);
+      });
+    }
+
+    return {
+      matched: true,
+      query,
+      canonicalName: fuzzyResult.canonicalName,
+      district: fuzzyResult.district,
+      state: 'Tamil Nadu',
+      latitude: fuzzyResult.latitude,
+      longitude: fuzzyResult.longitude,
+      source: 'dictionary',
+      confidence: fuzzyResult.confidence,
+      isTamilNadu: true,
+    };
+  }
+
+  // ----------------------------------------------------
+  // Guard against making external network calls for junk, noise, or short abbreviations
+  // ----------------------------------------------------
+  const lowerQuery = query.toLowerCase().trim();
+  const NOISE_LOOKUP_WORDS = new Set([
+    'city', 'town', 'twon', 'village', 'post', 'area', 'near', 'na', 'n/a',
+    'null', 'nil', 'none', 'test', 'yes', 'no', 'unknown', 'am', 'pm'
+  ]);
+  const OUT_OF_STATE_ABBRS = new Set([
+    'up', 'mp', 'ap', 'wb', 'kl', 'ka', 'mh', 'gj', 'rj', 'hr', 'pb', 'dl', 'ts', 'uk', 'hp', 'jk'
+  ]);
+
+  if (
+    options?.skipExternal ||
+    NOISE_LOOKUP_WORDS.has(lowerQuery) ||
+    (lowerQuery.length <= 2 && !OUT_OF_STATE_ABBRS.has(lowerQuery)) ||
+    /(.)\1{4,}/.test(lowerQuery) ||
+    (lowerQuery.length > 25 && !/\s/.test(lowerQuery))
+  ) {
     return {
       matched: false,
       query,
@@ -494,40 +487,6 @@ export async function resolveLocationTiered(
     }
   } catch (err) {
     console.error('External geocoding error:', err);
-  }
-
-  // ----------------------------------------------------
-  // Tier 3.5: Smart Misspelling Fallback for Typo-Tolerant Tamil Nadu Locations
-  // If external geocoder didn't resolve the string (e.g. typos like "Coimbatoor", "Saravanampati")
-  // ----------------------------------------------------
-  const fuzzyResult = resolveLocation(query);
-  if (fuzzyResult.matched) {
-    if (searchKey) {
-      setCachedLocation(searchKey, {
-        canonicalName: fuzzyResult.canonicalName,
-        district: fuzzyResult.district,
-        state: 'Tamil Nadu',
-        latitude: fuzzyResult.latitude,
-        longitude: fuzzyResult.longitude,
-        source: 'dictionary',
-        isTamilNadu: true,
-      }).catch((cacheErr) => {
-        console.warn('LocationCache save warning:', cacheErr);
-      });
-    }
-
-    return {
-      matched: true,
-      query,
-      canonicalName: fuzzyResult.canonicalName,
-      district: fuzzyResult.district,
-      state: 'Tamil Nadu',
-      latitude: fuzzyResult.latitude,
-      longitude: fuzzyResult.longitude,
-      source: 'dictionary',
-      confidence: fuzzyResult.confidence,
-      isTamilNadu: true,
-    };
   }
 
   // ----------------------------------------------------

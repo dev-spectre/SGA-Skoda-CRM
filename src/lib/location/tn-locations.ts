@@ -2210,7 +2210,12 @@ export const TN_LOCATIONS: LocationNode[] = [
       "614713"
     ],
     "aliases": [
-      "திருத்துறைப்பூண்டி"
+      "திருத்துறைப்பூண்டி",
+      "Tiruturaipundi",
+      "Thiruturaipoondi",
+      "Tiruthuraipoondi",
+      "Thiruthuraipundi",
+      "Tiruturaipoondi"
     ]
   },
   {
@@ -3326,6 +3331,36 @@ export const TN_LOCATIONS: LocationNode[] = [
       "பாண்டிச்சேரி",
       "புதுச்சேரி"
     ]
+  },
+  {
+    "id": "loc-somanur",
+    "name": "Somanur",
+    "district": "Coimbatore",
+    "type": "town",
+    "latitude": 11.088,
+    "longitude": 77.203,
+    "pincodes": [
+      "641668"
+    ],
+    "aliases": [
+      "சோமனூர்",
+      "Somanur RS"
+    ]
+  },
+  {
+    "id": "loc-vaiyappamalai",
+    "name": "Vaiyappamalai",
+    "district": "Namakkal",
+    "type": "town",
+    "latitude": 11.413,
+    "longitude": 78.071,
+    "pincodes": [
+      "637410"
+    ],
+    "aliases": [
+      "வையப்பமலை",
+      "Vaiyappamalai Road"
+    ]
   }
 ];
 
@@ -3389,6 +3424,22 @@ for (const loc of TN_LOCATIONS) {
       const aliasKey = normalizeKey(alias);
       if (aliasKey && !ALIAS_INDEX.has(aliasKey)) {
         ALIAS_INDEX.set(aliasKey, loc);
+      }
+    }
+  }
+
+  // 4. Automatic Thiru <-> Tiru transliteration variants
+  const allKeys = [exactKey, ...(loc.aliases || []).map(normalizeKey)].filter(Boolean);
+  for (const k of allKeys) {
+    if (k.startsWith('thiru') && k.length > 5) {
+      const alt = 'tiru' + k.slice(5);
+      if (!EXACT_INDEX.has(alt) && !ALIAS_INDEX.has(alt)) {
+        ALIAS_INDEX.set(alt, loc);
+      }
+    } else if (k.startsWith('tiru') && k.length > 4) {
+      const alt = 'thiru' + k.slice(4);
+      if (!EXACT_INDEX.has(alt) && !ALIAS_INDEX.has(alt)) {
+        ALIAS_INDEX.set(alt, loc);
       }
     }
   }

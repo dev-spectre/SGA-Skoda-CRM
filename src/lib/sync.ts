@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { getSheetData, batchUpdateSheetRows } from '@/lib/google';
 import { parsePhoneNumber, sanitizeField, parseSheetStatus, isInvalidPhoneNumber } from '@/lib/utils';
 import { getCachedSettings } from '@/lib/settings';
+import { isLocationOutsideTamilNadu } from '@/lib/location/out-of-state';
 
 interface ColumnMapping {
   name: number;
@@ -207,6 +208,7 @@ export async function performSheetSync() {
     uploadedById: true,
     sheetId: true,
     isInvalidPhone: true,
+    isOutOfState: true,
     isBranchManual: true,
     updatedAt: true,
   };
@@ -451,6 +453,9 @@ export async function performSheetSync() {
         sheetUpdatesToCorrect.push({ rowNumber, updates: corrections });
       }
 
+      const outOfState = isLocationOutsideTamilNadu(city);
+      const invalidPhone = isInvalidPhoneNumber(phone);
+
       // Only queue DB update if metadata or status changed from sheet, preserving DB CRM fields
       const hasMetadataChanged = (
         shouldUpdateStatusFromSheet ||
@@ -462,7 +467,10 @@ export async function performSheetSync() {
         (isBranchCellConsultantName && consultantFoundInBranchCol && !existing.assignedConsultant) ||
         existing.platform !== platform ||
         existing.sheetRow !== rowNumber ||
-        existing.sheetId !== settings.selectedSpreadsheetId
+        existing.sheetId !== settings.selectedSpreadsheetId ||
+        existing.isOutOfState !== outOfState ||
+        existing.isInvalidPhone !== invalidPhone ||
+        (outOfState && existing.branch && !existing.isBranchManual)
       );
 
       if (hasMetadataChanged) {
@@ -475,15 +483,18 @@ export async function performSheetSync() {
           sheetRow: rowNumber,
           sheetId: settings.selectedSpreadsheetId,
           fingerprint,
-          isInvalidPhone: isInvalidPhoneNumber(phone),
+          isInvalidPhone: invalidPhone,
+          isOutOfState: outOfState,
         };
 
         if (shouldUpdateStatusFromSheet && newStatusFromSheet) {
           updatePayload.status = newStatusFromSheet;
         }
 
-        // If sheet's branch cell contained a consultant name, safely attribute it to assignedConsultant
-        if (isBranchCellConsultantName && consultantFoundInBranchCol) {
+        // If lead is outside Tamil Nadu, unassign branch unless manually set by staff
+        if (outOfState && !existing.isBranchManual) {
+          updatePayload.branch = '';
+        } else if (isBranchCellConsultantName && consultantFoundInBranchCol) {
           if (!existing.assignedConsultant) {
             updatePayload.assignedConsultant = consultantFoundInBranchCol;
           }
@@ -498,12 +509,14 @@ export async function performSheetSync() {
       }
       duplicates++;
     } else {
+      const outOfState = isLocationOutsideTamilNadu(city);
+      const assignedBranch = outOfState ? '' : (isBranchCellConsultantName ? '' : branch);
       toCreate.push({
         name,
         phone,
         city,
         adname,
-        branch: isBranchCellConsultantName ? '' : branch,
+        branch: assignedBranch,
         assignedConsultant: isBranchCellConsultantName ? consultantFoundInBranchCol : null,
         followUpDate1,
         followUpDate2,
@@ -517,6 +530,7 @@ export async function performSheetSync() {
         uploadedById: null,
         fingerprint,
         isInvalidPhone: isInvalidPhoneNumber(phone),
+        isOutOfState: outOfState,
         isBranchManual: false,
       });
       synced++;
